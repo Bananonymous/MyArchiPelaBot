@@ -9,6 +9,8 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  ChannelType,
+  PermissionFlagsBits,
 } = require('discord.js');
 const config = require('../config.json');
 const { dbExecute, dbQueryOne, dbQueryAll } = require('../database');
@@ -363,12 +365,32 @@ async function startLobby(interaction, explicitLobbyId) {
     }
   }
 
+  // Real Discord user IDs (numeric) — excludes on-behalf behalf_xxx keys
+  const discordUserIds = players
+    .map((p) => p.userId)
+    .filter((id) => /^\d+$/.test(id));
+
   let channelId = null;
   try {
     const safeName = `ap-${lobby.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 90)}`;
     const channel = await interaction.guild.channels.create({
       name: safeName,
+      type: ChannelType.GuildText,
       topic: `Archipelago: ${lobby.name} | ${config.serverHost}:${port}`,
+      permissionOverwrites: [
+        // Hide from everyone by default
+        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        // Grant access to each player who joined
+        ...discordUserIds.map((userId) => ({
+          id: userId,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+        })),
+        // Ensure the bot can always see and manage the channel
+        {
+          id: interaction.client.user.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
+        },
+      ],
     });
     channelId = channel.id;
 
@@ -412,8 +434,31 @@ async function startLobby(interaction, explicitLobbyId) {
     [port, pid, channelId, Math.floor(Date.now() / 1000), game.id]
   );
 
-  // Remove the lobby status embed now that the game is live
-  await deleteStatusMessage(interaction, lobby);
+  // Update the lobby status embed: mark as started and add a Join Channel button
+  if (lobby.statusMessageId && lobby.channelId) {
+    try {
+      const lobbyChannel = await interaction.client.channels.fetch(lobby.channelId);
+      const msg = await lobbyChannel.messages.fetch(lobby.statusMessageId);
+      const startedEmbed = new EmbedBuilder()
+        .setTitle(`Game Started: ${lobby.name}`)
+        .setColor(0x00cc44)
+        .addFields(
+          { name: 'Status', value: 'Running', inline: true },
+          { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
+        )
+        .setFooter({ text: 'Use the button below to join the private game channel' })
+        .setTimestamp();
+      const components = channelId ? [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel('Join Channel')
+            .setStyle(ButtonStyle.Link)
+            .setURL(`https://discord.com/channels/${lobby.guildId}/${channelId}`),
+        ),
+      ] : [];
+      await msg.edit({ embeds: [startedEmbed], components });
+    } catch (_) {}
+  }
 
   return interaction.followUp({
     content: `**${lobby.name}** is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
