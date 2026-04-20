@@ -1,7 +1,7 @@
 {
   "token": "YOUR_DISCORD_BOT_TOKEN",
   "clientId": "YOUR_APPLICATION_CLIENT_ID",
-  "guildId": "YOUR_DISCORD_SERVER_ID",
+  "guildIds": ["YOUR_DISCORD_SERVER_ID", "SECOND_DISCORD_SERVER_ID"],
   "sqliteFile": "/data/bot.db",
   "serverHost": "your.server.ip.or.domain",
   "portRange": { "min": 38281, "max": 38380 },

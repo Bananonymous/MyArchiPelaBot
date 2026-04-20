@@ -25,18 +25,26 @@ for (const file of slashCommandFiles) {
 
     const rest = new REST({ version: '10' }).setToken(config.token);
 
-    // Guild registration is instant; global registration takes up to 1 hour.
-    // When using guild registration, also clear any stale global commands so they
-    // don't appear as duplicates in the Discord UI.
-    if (config.guildId) {
-      await rest.put(Routes.applicationCommands(config.clientId), { body: [] });
-    }
-    const route = config.guildId
-      ? Routes.applicationGuildCommands(config.clientId, config.guildId)
-      : Routes.applicationCommands(config.clientId);
-    const data = await rest.put(route, { body: slashCommands });
+    // Normalise: support both legacy single guildId and new guildIds array
+    const guildIds = config.guildIds
+      ?? (config.guildId ? [config.guildId] : []);
 
-    console.log(`Successfully reloaded ${data.length} application (slash) commands.`);
+    if (guildIds.length > 0) {
+      // Guild registration is instant.
+      // Clear stale global commands first so they don't appear as duplicates.
+      await rest.put(Routes.applicationCommands(config.clientId), { body: [] });
+      for (const guildId of guildIds) {
+        const data = await rest.put(
+          Routes.applicationGuildCommands(config.clientId, guildId),
+          { body: slashCommands }
+        );
+        console.log(`Reloaded ${data.length} commands in guild ${guildId}.`);
+      }
+    } else {
+      // Global registration — takes up to 1 hour to propagate
+      const data = await rest.put(Routes.applicationCommands(config.clientId), { body: slashCommands });
+      console.log(`Successfully reloaded ${data.length} global application (slash) commands.`);
+    }
   } catch (error) {
     console.error(error);
   }
