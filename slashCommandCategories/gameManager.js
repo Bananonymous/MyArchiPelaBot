@@ -2,6 +2,7 @@ const {
   SlashCommandBuilder,
   InteractionContextType,
   EmbedBuilder,
+  AttachmentBuilder,
   ChannelType,
   PermissionFlagsBits,
 } = require('discord.js');
@@ -116,6 +117,23 @@ async function doStartGame(interaction, gameId) {
       .setTimestamp();
 
     await channel.send({ embeds: [embed] });
+
+    // Post the archive as a downloadable attachment (patch files for players)
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const stat = fs.statSync(game.gameFile);
+      if (stat.size <= 25 * 1024 * 1024) { // Discord's 25 MB limit
+        await channel.send({
+          content: '📦 Game archive (contains patch files for each player):',
+          files: [new AttachmentBuilder(game.gameFile, { name: path.basename(game.gameFile) })],
+        });
+      } else {
+        await channel.send({ content: `📦 Game archive is too large to attach (${(stat.size / 1024 / 1024).toFixed(1)} MB). Ask the host for the file.` });
+      }
+    } catch (e) {
+      console.error('Could not attach archive:', e.message);
+    }
   } catch (e) {
     console.error('Could not create game channel:', e.message);
   }

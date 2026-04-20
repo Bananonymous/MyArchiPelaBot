@@ -5,6 +5,7 @@ const {
   SlashCommandBuilder,
   InteractionContextType,
   EmbedBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
@@ -16,6 +17,7 @@ const yamlValidator = require('../lib/yamlValidator');
 const archipelagoRunner = require('../lib/archipelagoRunner');
 const portManager = require('../lib/portManager');
 const processManager = require('../lib/processManager');
+const minecraftManager = require('../lib/minecraftManager');
 
 async function buildStatusEmbed(lobby, players) {
   const playerLines = players && players.length
@@ -45,6 +47,15 @@ async function refreshStatusMessage(interaction, lobby) {
     const msg = await channel.messages.fetch(lobby.statusMessageId);
     const players = await dbQueryAll('SELECT * FROM lobby_players WHERE lobbyId = ?', [lobby.id]);
     await msg.edit({ embeds: [await buildStatusEmbed(lobby, players)] });
+  } catch (_) {}
+}
+
+async function deleteStatusMessage(interaction, lobby) {
+  if (!lobby.statusMessageId || !lobby.channelId) return;
+  try {
+    const channel = await interaction.client.channels.fetch(lobby.channelId);
+    const msg = await channel.messages.fetch(lobby.statusMessageId);
+    await msg.delete();
   } catch (_) {}
 }
 
@@ -339,6 +350,19 @@ async function startLobby(interaction, explicitLobbyId) {
     return interaction.followUp({ content: `Generation succeeded but server failed to start: \`${e.message}\`` });
   }
 
+  // Start Minecraft server if any player uses a Minecraft game
+  let mcStarted = false;
+  let mcError = null;
+  if (minecraftManager.isMinecraftGame(playerData)) {
+    try {
+      await minecraftManager.start(game.id, archivePath, `${config.serverHost}:${port}`);
+      mcStarted = true;
+    } catch (e) {
+      mcError = e.message;
+      console.error(`[mc-${game.id}] Failed to start Minecraft server: ${e.message}`);
+    }
+  }
+
   let channelId = null;
   try {
     const safeName = `ap-${lobby.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 90)}`;
@@ -348,24 +372,48 @@ async function startLobby(interaction, explicitLobbyId) {
     });
     channelId = channel.id;
 
+    const fields = [
+      { name: 'Connect', value: `\`${config.serverHost}:${port}\``, inline: false },
+      { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
+    ];
+    if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:25565\``, inline: false });
+    else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
+
     await channel.send({
       embeds: [
         new EmbedBuilder()
           .setTitle(`Game Started: ${lobby.name}`)
           .setColor(0x00cc44)
-          .addFields(
-            { name: 'Connect', value: `\`${config.serverHost}:${port}\``, inline: false },
-            { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
-          )
+          .addFields(fields)
           .setTimestamp(),
       ],
     });
-  } catch (_) {}
+
+    // Post archive as downloadable attachment for players to get their patch files
+    try {
+      const stat = fs.statSync(archivePath);
+      if (stat.size <= 25 * 1024 * 1024) {
+        await channel.send({
+          content: '📦 Game archive (contains patch files for each player):',
+          files: [new AttachmentBuilder(archivePath, { name: path.basename(archivePath) })],
+        });
+      } else {
+        await channel.send({ content: `📦 Game archive is too large to attach (${(stat.size / 1024 / 1024).toFixed(1)} MB). Ask the host for the file.` });
+      }
+    } catch (e) {
+      console.error('Could not attach archive:', e.message);
+    }
+  } catch (e) {
+    console.error('Could not create game channel:', e.message);
+  }
 
   await dbExecute(
     "UPDATE games SET status='running', port=?, pid=?, channelId=?, startedAt=? WHERE id=?",
     [port, pid, channelId, Math.floor(Date.now() / 1000), game.id]
   );
+
+  // Remove the lobby status embed now that the game is live
+  await deleteStatusMessage(interaction, lobby);
 
   return interaction.followUp({
     content: `**${lobby.name}** is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
@@ -399,7 +447,7 @@ async function cancelLobby(interaction, explicitLobbyId) {
 
   await dbExecute('DELETE FROM lobby_players WHERE lobbyId = ?', [lobby.id]);
   await dbExecute("UPDATE lobbies SET status = 'cancelled' WHERE id = ?", [lobby.id]);
-  await refreshStatusMessage(interaction, { ...lobby, status: 'cancelled' });
+  await deleteStatusMessage(interaction, lobby);
 
   return interaction.reply({ content: `Lobby **${lobby.name}** cancelled.` });
 }

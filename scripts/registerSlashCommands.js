@@ -25,7 +25,12 @@ for (const file of slashCommandFiles) {
 
     const rest = new REST({ version: '10' }).setToken(config.token);
 
-    // Guild registration is instant; global registration takes up to 1 hour
+    // Guild registration is instant; global registration takes up to 1 hour.
+    // When using guild registration, also clear any stale global commands so they
+    // don't appear as duplicates in the Discord UI.
+    if (config.guildId) {
+      await rest.put(Routes.applicationCommands(config.clientId), { body: [] });
+    }
     const route = config.guildId
       ? Routes.applicationGuildCommands(config.clientId, config.guildId)
       : Routes.applicationCommands(config.clientId);

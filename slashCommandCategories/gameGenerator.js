@@ -32,8 +32,8 @@ module.exports = {
   commands: [
     {
       commandBuilder: new SlashCommandBuilder()
-        .setName('ap-generate')
-        .setDescription('Validate and generate an Archipelago game from an uploaded YAML or ZIP.')
+        .setName('ap-generate-solo')
+        .setDescription('Validate and generate a solo Archipelago game from an uploaded YAML or ZIP.')
         .setContexts(InteractionContextType.Guild)
         .addAttachmentOption((opt) => opt
           .setName('config-file')
