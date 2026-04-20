@@ -1,0 +1,15 @@
+services:
+  archipelabot:
+    build: .
+    # host networking exposes all game ports (38281-38380) without individual mappings
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/data
+      # Minecraft Forge server directory (contains forge jar, mods/, APData/).
+      # Set "minecraftServerPath": "/opt/minecraft" in config.json.
+      # Change ~/Minecraft below to wherever your Forge server lives on the host.
+      - ~/Minecraft:/opt/minecraft
+    environment:
+      - NODE_ENV=production

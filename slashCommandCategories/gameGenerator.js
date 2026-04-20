@@ -1,10 +1,31 @@
 const axios = require('axios');
-const FormData = require('form-data');
 const tmp = require('tmp');
 const fs = require('fs');
-const { SlashCommandBuilder, InteractionContextType } = require('discord.js');
+const path = require('path');
+const {
+  SlashCommandBuilder,
+  InteractionContextType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+} = require('discord.js');
+const config = require('../config.json');
+const { dbExecute, dbQueryOne } = require('../database');
+const yamlValidator = require('../lib/yamlValidator');
+const archipelagoRunner = require('../lib/archipelagoRunner');
 
-const API_ENDPOINT = 'https://archipelago.gg/api/generate';
+async function downloadToTemp(url, postfix) {
+  const tempFile = tmp.fileSync({ prefix: 'upload-', postfix });
+  const response = await axios.get(url, { responseType: 'stream' });
+  await new Promise((resolve, reject) => {
+    response.data
+      .pipe(fs.createWriteStream(tempFile.name))
+      .on('close', resolve)
+      .on('error', reject);
+  });
+  return tempFile;
+}
 
 module.exports = {
   category: 'Game Generator',
@@ -12,81 +33,121 @@ module.exports = {
     {
       commandBuilder: new SlashCommandBuilder()
         .setName('ap-generate')
-        .setDescription('Generate a game based on an uploaded file.')
-        .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel)
+        .setDescription('Validate and generate an Archipelago game from an uploaded YAML or ZIP.')
+        .setContexts(InteractionContextType.Guild)
         .addAttachmentOption((opt) => opt
           .setName('config-file')
-          .setDescription('Archipelago yaml, json, or zip file')
+          .setDescription('Archipelago YAML or ZIP containing player YAML files')
           .setRequired(true))
         .addStringOption((opt) => opt
-          .setName('mode')
-          .setDescription('Generate this game normally, or with race or tournament presets')
-          .setRequired(false)
-          .addChoices(
-            { name: 'Normal', value: 'normal' },
-            { name: 'Race', value: 'race' },
-            { name: 'Tournament', value: 'tournament' },
-          )),
+          .setName('name')
+          .setDescription('A name for this game (defaults to filename)')
+          .setRequired(false)),
+
       async execute(interaction) {
         await interaction.deferReply();
-        const configFile = interaction.options.getAttachment('config-file');
-        const mode = interaction.options.getString('mode', false) ?? 'normal';
 
-        // Default settings
-        let race = '0';
-        let hintCost = '10';
-        let forfeitMode = 'auto';
-        let remainingMode = 'disabled';
-        let collectMode = 'goal';
+        const attachment = interaction.options.getAttachment('config-file');
+        const gameName = interaction.options.getString('name', false)
+          ?? path.basename(attachment.name, path.extname(attachment.name));
 
-        switch(mode){
-          case 'race':
-            race = '1';
-            collectMode = 'disabled';
-            break;
+        const ext = path.extname(attachment.name).toLowerCase();
+        const isZip = ext === '.zip';
+        const isYaml = ext === '.yaml' || ext === '.yml';
 
-          case 'tournament':
-            race = '1';
-            hintCost = '101';
-            forfeitMode = 'disabled';
-            remainingMode = 'disabled';
-            collectMode = 'disabled';
-            break;
+        if (!isYaml && !isZip) {
+          return interaction.followUp({ content: 'Only `.yaml`, `.yml`, or `.zip` files are accepted.' });
         }
 
-        const postfix = '.' + configFile.name.split('.').reverse()[0];
-        const tempFile = tmp.fileSync({ prefix: 'upload-', postfix });
-        const response = await axios.get(configFile.url, { responseType: 'stream' });
-        return response.data.pipe(fs.createWriteStream(tempFile.name))
-          .on('close', () => {
-            // Send request to api
-            const formData = new FormData();
-            formData.append('file', fs.createReadStream(tempFile.name), tempFile.name);
-            formData.append('hint_cost', hintCost);
-            formData.append('forfeit_mode', forfeitMode);
-            formData.append('remaining_mode', remainingMode);
-            formData.append('collect_mode', collectMode);
-            formData.append('race', race);
-            const axiosOpts = { headers: formData.getHeaders() };
-            axios.post(API_ENDPOINT, formData, axiosOpts)
-              .then(async (apResponse) => {
-                await interaction.followUp('Seed generation underway. When it\'s ready, you will be ' +
-                                    `able to download your patch file from:\n${apResponse.data.url}`);
-                tempFile.removeCallback();
-              }).catch(async (error) => {
-                let responseText = 'The Archipelago API was unable to generate your game.';
-                if(error.isAxiosError && error.response && error.response.data){
-                  responseText += `\nThe following data was returned from the endpoint (${API_ENDPOINT}):` +
-                    `\n\`\`\`${JSON.stringify(error.response.data)}\`\`\``;
-                  console.error(`Unable to generate game on ${API_ENDPOINT}. The following ` +
-                    `data was returned from the endpoint:\n${JSON.stringify(error.response.data)}`);
-                  console.error(error.response.data);
-                }
-                await interaction.followUp({ content: responseText });
-                return console.error(error);
-              });
+        // Download the uploaded file
+        let tempFile;
+        try {
+          tempFile = await downloadToTemp(attachment.url, ext);
+        } catch (e) {
+          return interaction.followUp({ content: `Failed to download the file: ${e.message}` });
+        }
+
+        // Validate YAML files (skip validation for ZIPs — Archipelago will catch errors)
+        let players = [];
+        if (isYaml) {
+          const result = yamlValidator.validateFile(tempFile.name);
+          if (!result.valid) {
+            tempFile.removeCallback();
+            const errorList = result.errors.map((e) => `• ${e}`).join('\n');
+            return interaction.followUp({
+              content: `**YAML validation failed:**\n${errorList}`,
+            });
+          }
+          players = result.players;
+        }
+
+        // Set up output directory under dataPath/temp/<timestamp>
+        const workDir = path.join(config.dataPath, 'temp', `gen-${Date.now()}`);
+        fs.mkdirSync(workDir, { recursive: true });
+
+        // For ZIP: pass as-is (Archipelago accepts zips); for YAML: wrap in array
+        let generatedFile;
+        try {
+          generatedFile = await archipelagoRunner.generate([tempFile.name], workDir);
+        } catch (e) {
+          tempFile.removeCallback();
+          fs.rmSync(workDir, { recursive: true, force: true });
+          return interaction.followUp({
+            content: `**Generation failed:**\n\`\`\`${e.message.slice(0, 1800)}\`\`\``,
           });
-      }
+        }
+
+        // Move generated file to archives
+        const archivesDir = path.join(config.dataPath, 'archives');
+        fs.mkdirSync(archivesDir, { recursive: true });
+        const generatedExt = path.extname(generatedFile);
+        const archiveName = `${Date.now()}-${gameName.replace(/[^a-zA-Z0-9_-]/g, '_')}${generatedExt}`;
+        const archivePath = path.join(archivesDir, archiveName);
+        fs.renameSync(generatedFile, archivePath);
+
+        tempFile.removeCallback();
+        fs.rmSync(workDir, { recursive: true, force: true });
+
+        // Create game record
+        await dbExecute(
+          `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt)
+           VALUES (?, ?, 'pending', ?, ?, ?)`,
+          [
+            interaction.guildId,
+            archivePath,
+            JSON.stringify(players),
+            gameName,
+            Math.floor(Date.now() / 1000),
+          ]
+        );
+        const game = await dbQueryOne(
+          'SELECT id FROM games WHERE gameFile = ?',
+          [archivePath]
+        );
+
+        const embed = new EmbedBuilder()
+          .setTitle(`Game Ready: ${gameName}`)
+          .setColor(0x00b0f4)
+          .addFields(
+            { name: 'Game ID', value: String(game.id), inline: true },
+            { name: 'Status', value: 'Pending', inline: true },
+            {
+              name: 'Players',
+              value: players.length
+                ? players.map((p) => `${p.name} (${p.game})`).join('\n')
+                : '_Unknown (ZIP upload)_',
+            }
+          );
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`startgame_${game.id}`)
+            .setLabel('Start Game')
+            .setStyle(ButtonStyle.Success)
+        );
+
+        return interaction.followUp({ embeds: [embed], components: [row] });
+      },
     },
   ],
 };

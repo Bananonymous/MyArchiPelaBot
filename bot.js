@@ -1,21 +1,41 @@
 const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const config = require('./config.json');
 const { cachePartial } = require('./lib');
-const { dbInit } = require('./database');
+const { dbInit, dbExecute, dbQueryAll } = require('./database');
 const { generalErrorHandler } = require('./errorHandlers');
+const portManager = require('./lib/portManager');
 const fs = require('fs');
 
 // Catch all unhandled errors
 process.on('uncaughtException', (err) => generalErrorHandler(err));
 process.on('unhandledRejection', (err) => generalErrorHandler(err));
 
-// Initialize database in memory
-dbInit();
+async function init() {
+  await dbInit();
+  await portManager.init();
+
+  // Mark any games that were "running" at last shutdown as crashed — their processes are gone
+  const orphaned = await dbQueryAll("SELECT id, gameName FROM games WHERE status = 'running'");
+  if (orphaned) {
+    for (const game of orphaned) {
+      await dbExecute(
+        "UPDATE games SET status = 'crashed', endedAt = ? WHERE id = ?",
+        [Math.floor(Date.now() / 1000), game.id]
+      );
+      console.warn(`Startup: marked game ${game.id} (${game.gameName}) as crashed (orphaned from prior run).`);
+    }
+  }
+}
 
 const client = new Client({
-  partials: [ Partials.GuildMember, Partials.Message, Partials.Channel ],
-  intents: [ GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
+  partials: [Partials.GuildMember, Partials.Message, Partials.Channel],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
 });
 client.messageListeners = [];
 client.channelDeletedListeners = [];
@@ -51,41 +71,36 @@ fs.readdirSync('./voiceStateListeners').filter((file) => file.endsWith('.js')).f
   client.voiceStateListeners.push(listener);
 });
 
-// Load routines and run them once per hour
+// Load routines: game monitor runs every 60s; everything else runs hourly
 fs.readdirSync('./routines').filter((file) => file.endsWith('.js')).forEach((routineFile) => {
   const routine = require(`./routines/${routineFile}`);
-  setInterval(routine, 3600000);
+  const intervalMs = routineFile === 'gameMonitor.js' ? 60_000 : 3_600_000;
+  setInterval(() => routine(client), intervalMs);
 });
 
 // Run messages through the listeners
 client.on(Events.MessageCreate, async (msg) => {
-  // Fetch message if partial
   const message = await cachePartial(msg);
   if (message.member) { message.member = await cachePartial(message.member); }
   if (message.author) { message.author = await cachePartial(message.author); }
-
-  // Ignore all bot messages
   if (message.author.bot) { return; }
-
-  // Run the message through the message listeners
   return client.messageListeners.forEach((listener) => listener(client, message));
 });
 
 // Run channelDelete events through their listeners
-client.on(Events.ChannelDelete, async(channel) => {
+client.on(Events.ChannelDelete, async (channel) => {
   client.channelDeletedListeners.forEach((listener) => listener(client, channel));
 });
 
 // Run the voice states through the listeners
-client.on(Events.VoiceStateUpdate, async(oldState, newState) => {
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   oldState.member = await cachePartial(oldState.member);
   newState.member = await cachePartial(newState.member);
   client.voiceStateListeners.forEach((listener) => listener(client, oldState, newState));
 });
 
-// Run the interactions through the interactionListeners
-client.on(Events.InteractionCreate, async(interaction) => {
-  // Handle slash command interactions independently of other interactions
+// Run interactions through slash command and button handlers
+client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isChatInputCommand()) {
     for (const category of client.slashCommandCategories) {
       for (const listener of category.commands) {
@@ -94,19 +109,38 @@ client.on(Events.InteractionCreate, async(interaction) => {
         }
       }
     }
-
-    // If this slash command has no known listener, notify the user and log a warning
     console.warn(`Unknown slash command received: ${interaction.commandName}`);
     return interaction.reply('Unknown command.');
   }
+
+  if (interaction.isButton()) {
+    const [action, ...args] = interaction.customId.split('_');
+    if (action === 'startgame') {
+      const gameId = parseInt(args[0], 10);
+      const { startGameHandler } = require('./slashCommandCategories/gameManager');
+      await interaction.deferReply();
+      return startGameHandler(interaction, gameId);
+    }
+    if (action === 'lobbystart') {
+      const lobbyId = parseInt(args[0], 10);
+      const { startLobbyHandler } = require('./slashCommandCategories/lobbyManager');
+      return startLobbyHandler(interaction, lobbyId);
+    }
+    if (action === 'lobbycancel') {
+      const lobbyId = parseInt(args[0], 10);
+      const { cancelLobbyHandler } = require('./slashCommandCategories/lobbyManager');
+      return cancelLobbyHandler(interaction, lobbyId);
+    }
+  }
 });
 
-// Use the general error handler to handle unexpected errors
-client.on(Events.Error, async(error) => generalErrorHandler(error));
+client.on(Events.Error, async (error) => generalErrorHandler(error));
 
 client.once(Events.ClientReady, async () => {
-  // Login and initial setup successful
   console.info(`Connected to Discord. Active in ${client.guilds.cache.size} guilds.`);
 });
 
-client.login(config.token);
+init().then(() => client.login(config.token)).catch((err) => {
+  console.error('Initialization failed:', err);
+  process.exit(1);
+});

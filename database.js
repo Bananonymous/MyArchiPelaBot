@@ -22,6 +22,54 @@ module.exports = {
         isReady INTEGER NOT NULL DEFAULT 0,
         UNIQUE (readySystemId, userId)
       )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS games (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        guildId VARCHAR(128) NOT NULL,
+        channelId VARCHAR(128),
+        gameFile TEXT,
+        port INTEGER,
+        pid INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending',
+        players TEXT,
+        gameName TEXT,
+        startedAt INTEGER,
+        endedAt INTEGER
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS lobbies (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        guildId TEXT NOT NULL,
+        channelId TEXT NOT NULL,
+        creatorId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        statusMessageId TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        createdAt INTEGER NOT NULL
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS lobby_players (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        lobbyId INTEGER NOT NULL,
+        userId TEXT NOT NULL,
+        playerName TEXT,
+        gameName TEXT,
+        yamlPath TEXT,
+        joinedAt INTEGER NOT NULL,
+        UNIQUE (lobbyId, userId)
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS apworlds (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        version TEXT,
+        filePath TEXT NOT NULL,
+        installedAt INTEGER
+      )
       `
     ];
     for (let query of tableQueries) {

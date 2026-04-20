@@ -25,8 +25,11 @@ for (const file of slashCommandFiles) {
 
     const rest = new REST({ version: '10' }).setToken(config.token);
 
-    // The put method is used to fully refresh all commands in the guild with the current set
-    const data = await rest.put(Routes.applicationCommands(config.clientId), { body: slashCommands });
+    // Guild registration is instant; global registration takes up to 1 hour
+    const route = config.guildId
+      ? Routes.applicationGuildCommands(config.clientId, config.guildId)
+      : Routes.applicationCommands(config.clientId);
+    const data = await rest.put(route, { body: slashCommands });
 
     console.log(`Successfully reloaded ${data.length} application (slash) commands.`);
   } catch (error) {
