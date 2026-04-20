@@ -25,9 +25,12 @@ for (const file of slashCommandFiles) {
 
     const rest = new REST({ version: '10' }).setToken(config.token);
 
-    // Normalise: support both legacy single guildId and new guildIds array
+    // Normalise: support guildIds array, legacy single guildId string,
+    // and comma-separated guildId string ("ID1,ID2")
     const guildIds = config.guildIds
-      ?? (config.guildId ? [config.guildId] : []);
+      ?? (config.guildId
+        ? String(config.guildId).split(',').map((s) => s.trim()).filter(Boolean)
+        : []);
 
     if (guildIds.length > 0) {
       // Guild registration is instant.
