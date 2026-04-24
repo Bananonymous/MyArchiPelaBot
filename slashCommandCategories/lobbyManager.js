@@ -8,7 +8,11 @@ const {
   AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
   PermissionFlagsBits,
 } = require('discord.js');
@@ -20,6 +24,8 @@ const archipelagoRunner = require('../lib/archipelagoRunner');
 const portManager = require('../lib/portManager');
 const processManager = require('../lib/processManager');
 const minecraftManager = require('../lib/minecraftManager');
+const { attachGameNotifier } = require('../lib/gameNotifier');
+const { setupTrackers } = require('../lib/trackerUpdater');
 
 async function buildStatusEmbed(lobby, players) {
   const playerLines = players && players.length
@@ -61,8 +67,71 @@ async function deleteStatusMessage(interaction, lobby) {
   } catch (_) {}
 }
 
+async function joinLobbyButton(interaction, lobbyId) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.reply({ content: 'This lobby is no longer open.', ephemeral: true });
+
+  const modal = new ModalBuilder()
+    .setCustomId(`lobbyjoinmodal_${lobbyId}`)
+    .setTitle(`Join: ${lobby.name.slice(0, 40)}`);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('yaml_content')
+        .setLabel('Paste your YAML settings here')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setPlaceholder('name: MyPlayer\ngame: A Link to the Past\n...')
+        .setMaxLength(4000)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function joinLobbyModal(interaction, lobbyId) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.reply({ content: 'This lobby is no longer open.', ephemeral: true });
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const yamlContent = interaction.fields.getTextInputValue('yaml_content');
+  const lobbyDir = path.join(config.dataPath, 'temp', `lobby-${lobbyId}`);
+  fs.mkdirSync(lobbyDir, { recursive: true });
+  const yamlPath = path.join(lobbyDir, `${interaction.user.id}.yaml`);
+  fs.writeFileSync(yamlPath, yamlContent, 'utf8');
+
+  const result = yamlValidator.validateFile(yamlPath);
+  if (!result.valid) {
+    fs.unlinkSync(yamlPath);
+    return interaction.followUp({
+      content: `**YAML validation failed:**\n${result.errors.map((e) => `• ${e}`).join('\n')}`,
+    });
+  }
+
+  const player = result.players[0] ?? {};
+  await dbExecute(
+    `INSERT INTO lobby_players (lobbyId, userId, playerName, gameName, yamlPath, joinedAt)
+     VALUES (?,?,?,?,?,?)
+     ON CONFLICT(lobbyId, userId) DO UPDATE SET
+       playerName = excluded.playerName,
+       gameName   = excluded.gameName,
+       yamlPath   = excluded.yamlPath,
+       joinedAt   = excluded.joinedAt`,
+    [lobbyId, interaction.user.id, player.name ?? null, player.game ?? null, yamlPath, Math.floor(Date.now() / 1000)]
+  );
+
+  await refreshStatusMessage(interaction, lobby);
+  return interaction.followUp({
+    content: `Joined as **${player.name}** (${player.game}) in **${lobby.name}**.`,
+  });
+}
+
 module.exports = {
   category: 'Lobby',
+  joinLobbyButtonHandler: (interaction, lobbyId) => joinLobbyButton(interaction, lobbyId),
+  joinLobbyModalHandler: (interaction, lobbyId) => joinLobbyModal(interaction, lobbyId),
   commands: [
     {
       commandBuilder: new SlashCommandBuilder()
@@ -99,6 +168,10 @@ module.exports = {
 
         const embed = await buildStatusEmbed(lobby, []);
         const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`lobbyjoin_${lobby.id}`)
+            .setLabel('Join Lobby')
+            .setStyle(ButtonStyle.Primary),
           new ButtonBuilder()
             .setCustomId(`lobbystart_${lobby.id}`)
             .setLabel('Start Game')
@@ -140,12 +213,6 @@ module.exports = {
         }
 
         const onBehalf = interaction.options.getString('on-behalf', false);
-        if (onBehalf && lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
-          return interaction.reply({
-            content: 'Only the lobby creator or an admin can submit on behalf of another player.',
-            ephemeral: true,
-          });
-        }
 
         const attachment = interaction.options.getAttachment('yaml');
         const ext = path.extname(attachment.name).toLowerCase();
@@ -329,7 +396,11 @@ async function startLobby(interaction, explicitLobbyId) {
   fs.renameSync(generatedFile, archivePath);
   fs.rmSync(workDir, { recursive: true, force: true });
 
-  const playerData = players.map((p) => ({ name: p.playerName, game: p.gameName }));
+  const playerData = players.map((p) => ({
+    name: p.playerName,
+    game: p.gameName,
+    discordUserId: /^\d+$/.test(p.userId) ? p.userId : null,
+  }));
   await dbExecute(
     `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt)
      VALUES (?,?,'pending',?,?,?)`,
@@ -346,7 +417,7 @@ async function startLobby(interaction, explicitLobbyId) {
 
   let pid;
   try {
-    pid = await processManager.start(game.id, archivePath, port);
+    pid = await processManager.start(game.id, archivePath, port, playerData);
   } catch (e) {
     portManager.release(port);
     return interaction.followUp({ content: `Generation succeeded but server failed to start: \`${e.message}\`` });
@@ -395,21 +466,39 @@ async function startLobby(interaction, explicitLobbyId) {
     channelId = channel.id;
 
     const fields = [
-      { name: 'Connect', value: `\`${config.serverHost}:${port}\``, inline: false },
+      { name: 'Connect', value: `\`${config.serverHost}:${port}\`${config.ssl?.cert ? ' (WSS enabled)' : ''}`, inline: false },
       { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
     ];
     if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:25565\``, inline: false });
     else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
 
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`Game Started: ${lobby.name}`)
-          .setColor(0x00cc44)
-          .addFields(fields)
-          .setTimestamp(),
-      ],
-    });
+    const startEmbed = new EmbedBuilder()
+      .setTitle(`Game Started: ${lobby.name}`)
+      .setColor(0x00cc44)
+      .addFields(fields)
+      .setTimestamp();
+
+    const controlsRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`feedlevel_${game.id}`)
+        .setPlaceholder('Game feed: Pings only (default)')
+        .addOptions([
+          { label: 'Pings only', description: 'No automatic messages — only priority item pings', value: 'none' },
+          { label: 'Goals + Hints', description: 'Post goal completions and hint messages', value: 'goals' },
+          { label: 'Progression items', description: 'Post when a progression item is found', value: 'items_prog' },
+          { label: 'All items', description: 'Post every item send', value: 'items_all' },
+          { label: 'Full feed', description: 'Post everything: items, joins, parts, chat, hints', value: 'full' },
+        ])
+    );
+    const pingRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`notifping_${game.id}`)
+        .setLabel('Enable Priority Pings 🔔')
+        .setStyle(ButtonStyle.Secondary)
+    );
+    await channel.send({ embeds: [startEmbed], components: [controlsRow, pingRow] });
+    attachGameNotifier(game.id, channel);
+    setupTrackers(game.id, channel, playerData);
 
     // Post archive as downloadable attachment for players to get their patch files
     try {

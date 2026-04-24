@@ -13,7 +13,8 @@
     "form-data": "^4.0.4",
     "js-yaml": "^4.1.0",
     "sqlite3": "^5.1.7",
-    "tmp": "^0.2.5"
+    "tmp": "^0.2.5",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "eslint": "^9.34.0"

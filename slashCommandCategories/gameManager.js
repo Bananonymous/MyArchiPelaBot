@@ -3,6 +3,10 @@ const {
   InteractionContextType,
   EmbedBuilder,
   AttachmentBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
   ChannelType,
   PermissionFlagsBits,
 } = require('discord.js');
@@ -12,6 +16,8 @@ const portManager = require('../lib/portManager');
 const processManager = require('../lib/processManager');
 const minecraftManager = require('../lib/minecraftManager');
 const { isAdmin } = require('../lib/permissions');
+const { attachGameNotifier } = require('../lib/gameNotifier');
+const { setupTrackers } = require('../lib/trackerUpdater');
 
 const STATUS_COLORS = {
   pending: 0xffa500,
@@ -59,17 +65,18 @@ async function doStartGame(interaction, gameId) {
     await interaction.deferReply();
   }
 
+  let players;
+  try { players = JSON.parse(game.players ?? '[]'); } catch (_) { players = []; }
+
   let pid;
   try {
-    pid = await processManager.start(gameId, game.gameFile, port);
+    pid = await processManager.start(gameId, game.gameFile, port, players);
   } catch (e) {
     portManager.release(port);
     return interaction.followUp({ content: `Failed to start server: \`${e.message}\`` });
   }
 
   // Start Minecraft server if any player is using a Minecraft Dig game
-  let players;
-  try { players = JSON.parse(game.players ?? '[]'); } catch (_) { players = []; }
 
   let mcStarted = false;
   let mcError = null;
@@ -97,7 +104,7 @@ async function doStartGame(interaction, gameId) {
     const fields = [
       { name: 'Game ID', value: String(gameId), inline: true },
       { name: 'AP Port', value: String(port), inline: true },
-      { name: 'AP Connect', value: `\`${config.serverHost}:${port}\``, inline: false },
+      { name: 'AP Connect', value: `\`${config.serverHost}:${port}\`${config.ssl?.cert ? ' (WSS enabled)' : ''}`, inline: false },
       {
         name: 'Players',
         value: players.length ? players.map((p) => `${p.name} (${p.game})`).join('\n') : '_Unknown_',
@@ -116,7 +123,16 @@ async function doStartGame(interaction, gameId) {
       .addFields(fields)
       .setTimestamp();
 
-    await channel.send({ embeds: [embed] });
+    const controlsRow = buildGameControlsRow(gameId);
+    const pingRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`notifping_${gameId}`)
+        .setLabel('Enable Priority Pings 🔔')
+        .setStyle(ButtonStyle.Secondary)
+    );
+    await channel.send({ embeds: [embed], components: [controlsRow, pingRow] });
+    attachGameNotifier(gameId, channel);
+    setupTrackers(gameId, channel, players);
 
     // Post the archive as a downloadable attachment (patch files for players)
     try {
@@ -149,9 +165,82 @@ async function doStartGame(interaction, gameId) {
   });
 }
 
+function buildGameControlsRow(gameId) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`feedlevel_${gameId}`)
+      .setPlaceholder('Game feed: Pings only (default)')
+      .addOptions([
+        { label: 'Pings only', description: 'No automatic messages — only priority item pings', value: 'none' },
+        { label: 'Goals + Hints', description: 'Post goal completions and hint messages', value: 'goals' },
+        { label: 'Progression items', description: 'Post when a progression item is found', value: 'items_prog' },
+        { label: 'All items', description: 'Post every item send', value: 'items_all' },
+        { label: 'Full feed', description: 'Post everything: items, joins, parts, chat, hints', value: 'full' },
+      ])
+  );
+}
+
+async function handleNotifToggle(interaction, gameId) {
+  const userId = interaction.user.id;
+  const game = await dbQueryOne('SELECT players FROM games WHERE id = ?', [gameId]);
+  if (!game) return interaction.reply({ content: 'Game not found.', ephemeral: true });
+
+  let players;
+  try { players = JSON.parse(game.players ?? '[]'); } catch { players = []; }
+  const isPlayer = players.some((p) => p.discordUserId === userId);
+  if (!isPlayer && !isAdmin(interaction.member)) {
+    return interaction.reply({ content: 'You are not a player in this game.', ephemeral: true });
+  }
+
+  const existing = await dbQueryOne(
+    'SELECT enabled FROM notifications WHERE userId = ? AND gameId = ?',
+    [userId, gameId]
+  );
+  if (!existing) {
+    await dbExecute('INSERT INTO notifications (userId, gameId, enabled) VALUES (?,?,1)', [userId, gameId]);
+    return interaction.reply({ content: '🔔 Priority pings enabled! You will be pinged when a progression item belonging to you is found.', ephemeral: true });
+  }
+  const newEnabled = existing.enabled ? 0 : 1;
+  await dbExecute(
+    'UPDATE notifications SET enabled = ? WHERE userId = ? AND gameId = ?',
+    [newEnabled, userId, gameId]
+  );
+  return interaction.reply({
+    content: newEnabled ? '🔔 Priority pings enabled!' : '🔕 Priority pings disabled.',
+    ephemeral: true,
+  });
+}
+
+async function handleFeedLevel(interaction, gameId) {
+  const userId = interaction.user.id;
+  const game = await dbQueryOne('SELECT players FROM games WHERE id = ?', [gameId]);
+  if (!game) return interaction.reply({ content: 'Game not found.', ephemeral: true });
+
+  let players;
+  try { players = JSON.parse(game.players ?? '[]'); } catch { players = []; }
+  const isPlayer = players.some((p) => p.discordUserId === userId);
+  if (!isPlayer && !isAdmin(interaction.member)) {
+    return interaction.reply({ content: 'You are not a player in this game.', ephemeral: true });
+  }
+
+  const level = interaction.values[0];
+  await dbExecute('UPDATE games SET feedLevel = ? WHERE id = ?', [level, gameId]);
+
+  const labels = {
+    none: 'Pings only',
+    goals: 'Goals + Hints',
+    items_prog: 'Progression items',
+    items_all: 'All items',
+    full: 'Full feed',
+  };
+  return interaction.reply({ content: `Feed level set to **${labels[level] ?? level}**.`, ephemeral: true });
+}
+
 module.exports = {
   category: 'Game Manager',
   startGameHandler: doStartGame,
+  handleNotifToggle,
+  handleFeedLevel,
 
   commands: [
     {

@@ -70,11 +70,70 @@ module.exports = {
         filePath TEXT NOT NULL,
         installedAt INTEGER
       )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS notifications (
+        userId TEXT NOT NULL,
+        gameId INTEGER NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (userId, gameId)
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS game_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gameId INTEGER NOT NULL,
+        senderName TEXT,
+        receiverName TEXT,
+        itemName TEXT,
+        locationName TEXT,
+        flags INTEGER NOT NULL DEFAULT 0,
+        sentAt INTEGER NOT NULL
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS game_goals (
+        gameId INTEGER NOT NULL,
+        playerName TEXT NOT NULL,
+        completedAt INTEGER NOT NULL,
+        PRIMARY KEY (gameId, playerName)
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS player_trackers (
+        gameId INTEGER NOT NULL,
+        playerName TEXT NOT NULL,
+        threadId TEXT NOT NULL,
+        messageId TEXT NOT NULL,
+        PRIMARY KEY (gameId, playerName)
+      )
+      `,
+      `
+      CREATE TABLE IF NOT EXISTS game_hints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gameId INTEGER NOT NULL,
+        receivingSlot INTEGER NOT NULL,
+        receiverName TEXT,
+        finderSlot INTEGER NOT NULL,
+        finderName TEXT,
+        itemId INTEGER,
+        itemName TEXT,
+        locationId INTEGER,
+        locationName TEXT,
+        flags INTEGER NOT NULL DEFAULT 0,
+        found INTEGER NOT NULL DEFAULT 0,
+        hintedAt INTEGER NOT NULL,
+        UNIQUE(gameId, receivingSlot, finderSlot, itemId, locationId)
+      )
       `
     ];
     for (let query of tableQueries) {
       await module.exports.dbExecute(query);
     }
+    await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN feedLevel TEXT NOT NULL DEFAULT 'none'`).catch(() => {});
+    await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN trackerMessageId TEXT`).catch(() => {});
+    // Clean up malformed hint rows from the packet.item.id bug (correct field is packet.item.item)
+    await module.exports.dbExecute(`DELETE FROM game_hints WHERE itemId IS NULL`).catch(() => {});
   },
 
   // Execute a query on the database

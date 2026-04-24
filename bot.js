@@ -131,6 +131,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { cancelLobbyHandler } = require('./slashCommandCategories/lobbyManager');
       return cancelLobbyHandler(interaction, lobbyId);
     }
+    if (action === 'notifping') {
+      const gameId = parseInt(args[0], 10);
+      const { handleNotifToggle } = require('./slashCommandCategories/gameManager');
+      return handleNotifToggle(interaction, gameId);
+    }
+    if (action === 'lobbyjoin') {
+      const lobbyId = parseInt(args[0], 10);
+      const { joinLobbyButtonHandler } = require('./slashCommandCategories/lobbyManager');
+      return joinLobbyButtonHandler(interaction, lobbyId);
+    }
+  }
+
+  if (interaction.isModalSubmit()) {
+    const [action, ...args] = interaction.customId.split('_');
+    if (action === 'lobbyjoinmodal') {
+      const lobbyId = parseInt(args[0], 10);
+      const { joinLobbyModalHandler } = require('./slashCommandCategories/lobbyManager');
+      return joinLobbyModalHandler(interaction, lobbyId);
+    }
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    const [action, ...args] = interaction.customId.split('_');
+    if (action === 'feedlevel') {
+      const gameId = parseInt(args[0], 10);
+      const { handleFeedLevel } = require('./slashCommandCategories/gameManager');
+      return handleFeedLevel(interaction, gameId);
+    }
   }
 });
 
