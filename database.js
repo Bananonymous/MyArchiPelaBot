@@ -132,6 +132,7 @@ module.exports = {
     }
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN feedLevel TEXT NOT NULL DEFAULT 'none'`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN trackerMessageId TEXT`).catch(() => {});
+    await module.exports.dbExecute(`ALTER TABLE lobbies ADD COLUMN options TEXT`).catch(() => {});
     // Clean up malformed hint rows from the packet.item.id bug (correct field is packet.item.item)
     await module.exports.dbExecute(`DELETE FROM game_hints WHERE itemId IS NULL`).catch(() => {});
   },

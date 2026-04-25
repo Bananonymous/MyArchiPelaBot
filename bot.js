@@ -141,6 +141,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { joinLobbyButtonHandler } = require('./slashCommandCategories/lobbyManager');
       return joinLobbyButtonHandler(interaction, lobbyId);
     }
+    if (action === 'lobbyoptions') {
+      const lobbyId = parseInt(args[0], 10);
+      const { lobbyOptionsHandler } = require('./slashCommandCategories/lobbyManager');
+      return lobbyOptionsHandler(interaction, lobbyId);
+    }
   }
 
   if (interaction.isModalSubmit()) {
@@ -158,6 +163,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const gameId = parseInt(args[0], 10);
       const { handleFeedLevel } = require('./slashCommandCategories/gameManager');
       return handleFeedLevel(interaction, gameId);
+    }
+    if (action === 'lobbyopt') {
+      const lobbyId = parseInt(args[args.length - 1], 10);
+      const optKey = args.slice(0, -1).join('_'); // e.g. 'release', 'collect', 'remaining'
+      const { lobbyOptSelectHandler } = require('./slashCommandCategories/lobbyManager');
+      return lobbyOptSelectHandler(interaction, lobbyId, optKey);
     }
   }
 });

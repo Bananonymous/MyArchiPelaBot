@@ -27,6 +27,78 @@ const minecraftManager = require('../lib/minecraftManager');
 const { attachGameNotifier } = require('../lib/gameNotifier');
 const { setupTrackers } = require('../lib/trackerUpdater');
 
+const DEFAULT_OPTIONS = {
+  release_mode: 'goal',
+  collect_mode: 'goal',
+  remaining_mode: 'goal',
+  hint_cost: 10,
+};
+
+function parseOptions(optionsStr) {
+  try { return { ...DEFAULT_OPTIONS, ...JSON.parse(optionsStr ?? '{}') }; } catch { return { ...DEFAULT_OPTIONS }; }
+}
+
+const RELEASE_OPTIONS = [
+  { label: 'Disabled',      description: '!release is never available',                         value: 'disabled' },
+  { label: 'Manual always', description: 'Players can use !release at any time',                value: 'enabled' },
+  { label: 'After goal',    description: 'Players can use !release after completing their goal', value: 'goal' },
+  { label: 'Auto on goal',  description: 'Items auto-released when goal is completed',           value: 'auto' },
+  { label: 'Auto + manual', description: 'Auto-released on goal and always available',           value: 'auto-enabled' },
+];
+const COLLECT_OPTIONS = [
+  { label: 'Disabled',      description: '!collect is never available',                          value: 'disabled' },
+  { label: 'Manual always', description: 'Players can use !collect at any time',                 value: 'enabled' },
+  { label: 'After goal',    description: 'Players can use !collect after completing their goal',  value: 'goal' },
+  { label: 'Auto on goal',  description: 'Items auto-collected when goal is completed',           value: 'auto' },
+  { label: 'Auto + manual', description: 'Auto-collected on goal and always available',           value: 'auto-enabled' },
+];
+const REMAINING_OPTIONS = [
+  { label: 'Disabled',   description: '!remaining is never available',             value: 'disabled' },
+  { label: 'After goal', description: '!remaining available after completing goal', value: 'goal' },
+  { label: 'Always',     description: '!remaining is always available',             value: 'enabled' },
+];
+
+function buildOptionsPanel(lobby) {
+  const opts = parseOptions(lobby.options);
+  const label = (list, val) => list.find((o) => o.value === val)?.label ?? val;
+  const withDefault = (list, current) => list.map((o) => ({ ...o, default: o.value === current }));
+
+  const embed = new EmbedBuilder()
+    .setTitle('Lobby Options')
+    .setColor(0x5865f2)
+    .addFields(
+      { name: 'Release mode',   value: label(RELEASE_OPTIONS,   opts.release_mode),   inline: true },
+      { name: 'Collect mode',   value: label(COLLECT_OPTIONS,   opts.collect_mode),   inline: true },
+      { name: 'Remaining mode', value: label(REMAINING_OPTIONS, opts.remaining_mode), inline: true },
+      { name: 'Hint cost',      value: `${opts.hint_cost} points`,                    inline: true },
+    )
+    .setFooter({ text: 'Changes apply immediately' });
+
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`lobbyopt_release_${lobby.id}`)
+          .setPlaceholder('Release mode')
+          .addOptions(withDefault(RELEASE_OPTIONS, opts.release_mode))
+      ),
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`lobbyopt_collect_${lobby.id}`)
+          .setPlaceholder('Collect mode')
+          .addOptions(withDefault(COLLECT_OPTIONS, opts.collect_mode))
+      ),
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`lobbyopt_remaining_${lobby.id}`)
+          .setPlaceholder('Remaining mode')
+          .addOptions(withDefault(REMAINING_OPTIONS, opts.remaining_mode))
+      ),
+    ],
+  };
+}
+
 async function buildStatusEmbed(lobby, players) {
   const playerLines = players && players.length
     ? players.map((p) => {
@@ -34,6 +106,9 @@ async function buildStatusEmbed(lobby, players) {
         return status;
       }).join('\n')
     : '_No players yet — use /ap-lobby-join_';
+
+  const opts = parseOptions(lobby.options);
+  const optSummary = `Release: **${RELEASE_OPTIONS.find((o) => o.value === opts.release_mode)?.label ?? opts.release_mode}** | Collect: **${COLLECT_OPTIONS.find((o) => o.value === opts.collect_mode)?.label ?? opts.collect_mode}** | Remaining: **${REMAINING_OPTIONS.find((o) => o.value === opts.remaining_mode)?.label ?? opts.remaining_mode}** | Hint cost: **${opts.hint_cost}**`;
 
   return new EmbedBuilder()
     .setTitle(`Lobby: ${lobby.name}`)
@@ -43,6 +118,7 @@ async function buildStatusEmbed(lobby, players) {
       { name: 'Status', value: lobby.status, inline: true },
       { name: 'Created by', value: `<@${lobby.creatorId}>`, inline: true },
       { name: `Players (${players?.length ?? 0})`, value: playerLines },
+      { name: 'Options', value: optSummary },
     )
     .setFooter({ text: 'Use /ap-lobby-join to submit your YAML • /ap-lobby-start to generate' })
     .setTimestamp();
@@ -172,6 +248,10 @@ module.exports = {
             .setCustomId(`lobbyjoin_${lobby.id}`)
             .setLabel('Join Lobby')
             .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`lobbyoptions_${lobby.id}`)
+            .setLabel('⚙️ Options')
+            .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId(`lobbystart_${lobby.id}`)
             .setLabel('Start Game')
@@ -340,7 +420,34 @@ module.exports = {
   // Called from button handlers in bot.js
   startLobbyHandler: (interaction, lobbyId) => startLobby(interaction, lobbyId),
   cancelLobbyHandler: (interaction, lobbyId) => cancelLobby(interaction, lobbyId),
+  lobbyOptionsHandler: (interaction, lobbyId) => lobbyOptions(interaction, lobbyId),
+  lobbyOptSelectHandler: (interaction, lobbyId, optKey) => lobbyOptSelect(interaction, lobbyId, optKey),
 };
+
+async function lobbyOptions(interaction, lobbyId) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.reply({ content: 'This lobby is no longer open.', ephemeral: true });
+  if (lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
+    return interaction.reply({ content: 'Only the lobby creator or an admin can change options.', ephemeral: true });
+  }
+  return interaction.reply({ ...buildOptionsPanel(lobby), ephemeral: true });
+}
+
+async function lobbyOptSelect(interaction, lobbyId, optKey) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.update({ content: 'This lobby is no longer open.', embeds: [], components: [] });
+  if (lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
+    return interaction.reply({ content: 'Only the lobby creator or an admin can change options.', ephemeral: true });
+  }
+
+  const opts = parseOptions(lobby.options);
+  opts[`${optKey}_mode`] = interaction.values[0];
+  await dbExecute('UPDATE lobbies SET options = ? WHERE id = ?', [JSON.stringify(opts), lobbyId]);
+
+  const updatedLobby = { ...lobby, options: JSON.stringify(opts) };
+  await refreshStatusMessage(interaction, updatedLobby);
+  return interaction.update(buildOptionsPanel(updatedLobby));
+}
 
 async function startLobby(interaction, explicitLobbyId) {
   const lobby = explicitLobbyId
@@ -417,7 +524,7 @@ async function startLobby(interaction, explicitLobbyId) {
 
   let pid;
   try {
-    pid = await processManager.start(game.id, archivePath, port, playerData);
+    pid = await processManager.start(game.id, archivePath, port, playerData, parseOptions(lobby.options));
   } catch (e) {
     portManager.release(port);
     return interaction.followUp({ content: `Generation succeeded but server failed to start: \`${e.message}\`` });
