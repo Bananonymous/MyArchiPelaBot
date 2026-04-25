@@ -339,6 +339,46 @@ module.exports = {
 
     {
       commandBuilder: new SlashCommandBuilder()
+        .setName('ap-mc-restart')
+        .setDescription('Restart the Minecraft server for a running game. (Admin only)')
+        .setContexts(InteractionContextType.Guild)
+        .addIntegerOption((opt) => opt
+          .setName('game-id')
+          .setDescription('Game ID (defaults to game in this channel)')
+          .setRequired(false)),
+      async execute(interaction) {
+        if (!isAdmin(interaction.member)) {
+          return interaction.reply({ content: 'You need Administrator permissions to restart the Minecraft server.', ephemeral: true });
+        }
+
+        const gameId = interaction.options.getInteger('game-id') ?? (
+          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status = 'running'", [interaction.channelId])
+        )?.id;
+
+        if (!gameId) {
+          return interaction.reply({ content: 'No running game found in this channel. Specify a `game-id`.', ephemeral: true });
+        }
+
+        if (!minecraftManager.isRunning(gameId)) {
+          return interaction.reply({ content: 'No Minecraft server is running for this game.', ephemeral: true });
+        }
+
+        const game = await dbQueryOne('SELECT * FROM games WHERE id = ?', [gameId]);
+        await interaction.deferReply();
+
+        minecraftManager.stop(gameId);
+        try {
+          await minecraftManager.start(gameId, game.gameFile, `${config.serverHost}:${game.port}`);
+        } catch (e) {
+          return interaction.followUp({ content: `Failed to restart Minecraft server: \`${e.message}\`` });
+        }
+
+        return interaction.followUp({ content: `Minecraft server for **${game.gameName}** restarted. Connect at \`${config.serverHost}:25565\`.` });
+      },
+    },
+
+    {
+      commandBuilder: new SlashCommandBuilder()
         .setName('ap-archive')
         .setDescription('Mark a game as archived. (Admin only)')
         .setContexts(InteractionContextType.Guild)
