@@ -18,6 +18,7 @@ const minecraftManager = require('../lib/minecraftManager');
 const { isAdmin } = require('../lib/permissions');
 const { attachGameNotifier } = require('../lib/gameNotifier');
 const { setupTrackers } = require('../lib/trackerUpdater');
+const { readLocationCounts } = require('../lib/locationCountReader');
 
 const STATUS_COLORS = {
   pending: 0xffa500,
@@ -154,10 +155,11 @@ async function doStartGame(interaction, gameId) {
     console.error('Could not create game channel:', e.message);
   }
 
+  const locationCounts = await readLocationCounts(game.gameFile);
   await dbExecute(
-    `UPDATE games SET status = 'running', port = ?, pid = ?, channelId = ?, startedAt = ?
+    `UPDATE games SET status = 'running', port = ?, pid = ?, channelId = ?, startedAt = ?, gameOptions = ?, locationCounts = ?
      WHERE id = ?`,
-    [port, pid, channelId, Math.floor(Date.now() / 1000), gameId]
+    [port, pid, channelId, Math.floor(Date.now() / 1000), '{}', JSON.stringify(locationCounts), gameId]
   );
 
   return interaction.followUp({
@@ -329,7 +331,7 @@ module.exports = {
           .setDescription(
             games.map((g) => {
               const when = g.startedAt ? `<t:${g.startedAt}:R>` : '_unknown_';
-              return `**#${g.id}** ${g.gameName} — \`${g.status}\`${g.port ? ` :${g.port}` : ''} — ${when}`;
+              return `**#${g.id}** ${g.gameName} — \`${g.status}\`${g.port ? ` (port ${g.port})` : ''} — ${when}`;
             }).join('\n')
           );
 
@@ -411,6 +413,41 @@ module.exports = {
         }
 
         return interaction.reply({ content: `Game **${game.gameName}** (ID ${gameId}) archived and channel removed.` });
+      },
+    },
+
+    {
+      commandBuilder: new SlashCommandBuilder()
+        .setName('ap-cmd')
+        .setDescription('Send a command to the running AP server in this channel. (Admin only)')
+        .setContexts(InteractionContextType.Guild)
+        .addStringOption((opt) => opt
+          .setName('command')
+          .setDescription('Command to send, e.g. !hint Bananonymous "Empowering Jumps"')
+          .setRequired(true)),
+      async execute(interaction) {
+        if (!isAdmin(interaction.member)) {
+          return interaction.reply({ content: 'You need Administrator permissions to run server commands.', ephemeral: true });
+        }
+        const game = await dbQueryOne(
+          "SELECT id, gameName FROM games WHERE channelId = ? AND status = 'running'",
+          [interaction.channelId]
+        );
+        if (!game) {
+          return interaction.reply({ content: 'No running game found in this channel.', ephemeral: true });
+        }
+        const cmd = interaction.options.getString('command');
+        await interaction.deferReply({ ephemeral: true });
+        const lines = await processManager.sendCommand(game.id, cmd);
+        if (lines === null) {
+          return interaction.editReply({ content: 'Server process not found — the game may have crashed.' });
+        }
+        const output = lines.join('\n').trim();
+        return interaction.editReply({
+          content: output
+            ? `**${game.gameName}** › \`${cmd}\`\n\`\`\`${output.slice(0, 1900)}\`\`\``
+            : `Sent \`${cmd}\` — no output.`,
+        });
       },
     },
   ],

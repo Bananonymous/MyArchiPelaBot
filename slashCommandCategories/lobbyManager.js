@@ -26,6 +26,7 @@ const processManager = require('../lib/processManager');
 const minecraftManager = require('../lib/minecraftManager');
 const { attachGameNotifier } = require('../lib/gameNotifier');
 const { setupTrackers } = require('../lib/trackerUpdater');
+const { readLocationCounts } = require('../lib/locationCountReader');
 
 const DEFAULT_OPTIONS = {
   release_mode: 'goal',
@@ -149,7 +150,7 @@ async function joinLobbyButton(interaction, lobbyId) {
 
   const modal = new ModalBuilder()
     .setCustomId(`lobbyjoinmodal_${lobbyId}`)
-    .setTitle(`Join: ${lobby.name.slice(0, 40)}`);
+    .setTitle(`Join: ${lobby.name.slice(0, 40)} (ID:${lobby.id})`);
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
@@ -200,7 +201,7 @@ async function joinLobbyModal(interaction, lobbyId) {
 
   await refreshStatusMessage(interaction, lobby);
   return interaction.followUp({
-    content: `Joined as **${player.name}** (${player.game}) in **${lobby.name}**.`,
+    content: `Joined as **${player.name}** (${player.game}) in **${lobby.name}** (ID:${lobby.id}).`,
   });
 }
 
@@ -344,7 +345,7 @@ module.exports = {
         await refreshStatusMessage(interaction, lobby);
         const label = onBehalf ? `on behalf of **${onBehalf}**` : 'yourself';
         return interaction.followUp({
-          content: `Submitted ${label} as **${player.name}** (${player.game}) in **${lobby.name}**.`,
+          content: `Submitted ${label} as **${player.name}** (${player.game}) in **${lobby.name}** (ID:${lobby.id}).`,
         });
       },
     },
@@ -502,16 +503,19 @@ async function startLobby(interaction, explicitLobbyId) {
   const archivePath = path.join(archivesDir, archiveName);
   fs.renameSync(generatedFile, archivePath);
   fs.rmSync(workDir, { recursive: true, force: true });
+  const lobbyYamlDir = path.join(config.dataPath, 'temp', `lobby-${lobby.id}`);
+  fs.rmSync(lobbyYamlDir, { recursive: true, force: true });
 
+  const locationCounts = await readLocationCounts(archivePath);
   const playerData = players.map((p) => ({
     name: p.playerName,
     game: p.gameName,
     discordUserId: /^\d+$/.test(p.userId) ? p.userId : null,
   }));
   await dbExecute(
-    `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt)
-     VALUES (?,?,'pending',?,?,?)`,
-    [interaction.guildId, archivePath, JSON.stringify(playerData), lobby.name, Math.floor(Date.now() / 1000)]
+    `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt, locationCounts)
+     VALUES (?,?,'pending',?,?,?,?)`,
+    [interaction.guildId, archivePath, JSON.stringify(playerData), lobby.name, Math.floor(Date.now() / 1000), JSON.stringify(locationCounts)]
   );
   const game = await dbQueryOne('SELECT id FROM games WHERE gameFile = ?', [archivePath]);
   await dbExecute("UPDATE lobbies SET status = 'done' WHERE id = ?", [lobby.id]);
@@ -580,7 +584,7 @@ async function startLobby(interaction, explicitLobbyId) {
     else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
 
     const startEmbed = new EmbedBuilder()
-      .setTitle(`Game Started: ${lobby.name}`)
+      .setTitle(`Game Started: ${lobby.name} (ID:${lobby.id})`)
       .setColor(0x00cc44)
       .addFields(fields)
       .setTimestamp();
@@ -626,8 +630,8 @@ async function startLobby(interaction, explicitLobbyId) {
   }
 
   await dbExecute(
-    "UPDATE games SET status='running', port=?, pid=?, channelId=?, startedAt=? WHERE id=?",
-    [port, pid, channelId, Math.floor(Date.now() / 1000), game.id]
+    "UPDATE games SET status='running', port=?, pid=?, channelId=?, startedAt=?, gameOptions=? WHERE id=?",
+    [port, pid, channelId, Math.floor(Date.now() / 1000), JSON.stringify(parseOptions(lobby.options)), game.id]
   );
 
   // Update the lobby status embed: mark as started and add a Join Channel button
@@ -636,7 +640,7 @@ async function startLobby(interaction, explicitLobbyId) {
       const lobbyChannel = await interaction.client.channels.fetch(lobby.channelId);
       const msg = await lobbyChannel.messages.fetch(lobby.statusMessageId);
       const startedEmbed = new EmbedBuilder()
-        .setTitle(`Game Started: ${lobby.name}`)
+        .setTitle(`Game Started: ${lobby.name} (ID:${lobby.id})`)
         .setColor(0x00cc44)
         .addFields(
           { name: 'Status', value: 'Running', inline: true },
@@ -657,7 +661,7 @@ async function startLobby(interaction, explicitLobbyId) {
   }
 
   return interaction.followUp({
-    content: `**${lobby.name}** is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
+    content: `**${lobby.name}** (ID:${lobby.id}) is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
   });
 }
 
@@ -690,5 +694,5 @@ async function cancelLobby(interaction, explicitLobbyId) {
   await dbExecute("UPDATE lobbies SET status = 'cancelled' WHERE id = ?", [lobby.id]);
   await deleteStatusMessage(interaction, lobby);
 
-  return interaction.reply({ content: `Lobby **${lobby.name}** cancelled.` });
+  return interaction.reply({ content: `Lobby **${lobby.name}** (ID:${lobby.id}) cancelled.` });
 }

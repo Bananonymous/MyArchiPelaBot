@@ -1,7 +1,7 @@
 const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const config = require('./config.json');
 const { cachePartial } = require('./lib');
-const { dbInit, dbExecute, dbQueryAll } = require('./database');
+const { dbInit } = require('./database');
 const { generalErrorHandler } = require('./errorHandlers');
 const portManager = require('./lib/portManager');
 const fs = require('fs');
@@ -10,21 +10,19 @@ const fs = require('fs');
 process.on('uncaughtException', (err) => generalErrorHandler(err));
 process.on('unhandledRejection', (err) => generalErrorHandler(err));
 
+process.on('SIGTERM', () => {
+  console.info('SIGTERM received — shutting down.');
+  const processManager = require('./lib/processManager');
+  for (const [gameId, entry] of processManager.getAllRunning()) {
+    try { entry.client?.close(); } catch (_) {}
+    try { entry.process?.kill('SIGTERM'); } catch (_) {}
+  }
+  process.exit(0);
+});
+
 async function init() {
   await dbInit();
   await portManager.init();
-
-  // Mark any games that were "running" at last shutdown as crashed — their processes are gone
-  const orphaned = await dbQueryAll("SELECT id, gameName FROM games WHERE status = 'running'");
-  if (orphaned) {
-    for (const game of orphaned) {
-      await dbExecute(
-        "UPDATE games SET status = 'crashed', endedAt = ? WHERE id = ?",
-        [Math.floor(Date.now() / 1000), game.id]
-      );
-      console.warn(`Startup: marked game ${game.id} (${game.gameName}) as crashed (orphaned from prior run).`);
-    }
-  }
 }
 
 const client = new Client({
@@ -177,6 +175,8 @@ client.on(Events.Error, async (error) => generalErrorHandler(error));
 
 client.once(Events.ClientReady, async () => {
   console.info(`Connected to Discord. Active in ${client.guilds.cache.size} guilds.`);
+  const { recoverRunningGames } = require('./lib/recoveryManager');
+  recoverRunningGames(client).catch((e) => console.error('[recovery] Fatal error:', e));
 });
 
 init().then(() => client.login(config.token)).catch((err) => {

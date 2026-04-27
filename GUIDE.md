@@ -11,6 +11,7 @@
 
 - Use the **dropdown** to choose what the bot posts: goals, progression items, all items, or full feed
 - Click **Enable Priority Pings 🔔** to get pinged when one of *your* progression items is found
+- Click **Enable Priority Pings 🔔** again to disable pings
 
 ## Player commands
 
@@ -21,14 +22,22 @@
 | `/ap-lobby-leave` | Leave the open lobby |
 | `/ap-lobby-status` | Show current lobby and players |
 | `/ap-lobby-cancel` | Cancel the lobby (creator or admin) |
+| `/ap-template game:` | Get a starter YAML template for a game |
+| `/ap-tracker` | Show the global progress tracker for this game |
+| `/ap-tracker-personal` | Show your personal item and hint tracker |
 
 ## Admin commands
 
 | Command | Description |
 |---|---|
 | `/ap-install-world apworld-file:` | Install a `.apworld` game file |
-| `/ap-generate-solo config-file:` | Runs a room with the provided zip or yaml (if only yaml, starts a solo game) |
+| `/ap-remove-world` | Remove an installed APworld |
+| `/ap-list-worlds` | List custom installed APworlds |
+| `/ap-generate-solo config-file:` | Run a room from a zip or yaml file |
 | `/ap-list` | List recent games and their status |
+| `/ap-start game-id:` | Start a pending game |
 | `/ap-stop game-id:` | Stop a running game |
 | `/ap-archive game-id:` | Archive a stopped game and remove its channel |
 | `/ap-lobby-start` | Start the lobby via command instead of the button |
+| `/ap-mc-restart game-id:` | Restart the Minecraft server for a running game |
+| `/ap-cmd command:` | Send a command to the AP server in this channel (e.g. `!hint Player "Item"`) |

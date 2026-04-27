@@ -27,7 +27,8 @@ RUN printf '\n\ndef update(yes=False): return  # non-interactive Docker override
 
 # Use a virtualenv so Archipelago gets exactly its pinned versions
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install -r /opt/archipelago/requirements.txt
+    && /opt/venv/bin/pip install -r /opt/archipelago/requirements.txt \
+    && /opt/venv/bin/pip install maseya-z3pr
 
 # Put the venv first on PATH so python3 resolves to it everywhere,
 # including in Node.js child_process.spawn() calls

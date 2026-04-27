@@ -6,24 +6,6 @@ module.exports = {
   dbInit: async () => {
     const tableQueries = [
       `
-      CREATE TABLE IF NOT EXISTS readySystems (
-        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        guildId VARCHAR(128) NOT NULL,
-        channelId VARCHAR(128) NOT NULL,
-        userId VARCHAR(128) NOT NULL,
-        UNIQUE (guildId, channelId)
-      )
-      `,
-      `
-      CREATE TABLE IF NOT EXISTS readyChecks (
-        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        readySystemId INTEGER NOT NULL,
-        userId VARCHAR(128) NOT NULL,
-        isReady INTEGER NOT NULL DEFAULT 0,
-        UNIQUE (readySystemId, userId)
-      )
-      `,
-      `
       CREATE TABLE IF NOT EXISTS games (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         guildId VARCHAR(128) NOT NULL,
@@ -133,6 +115,8 @@ module.exports = {
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN feedLevel TEXT NOT NULL DEFAULT 'none'`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN trackerMessageId TEXT`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE lobbies ADD COLUMN options TEXT`).catch(() => {});
+    await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN gameOptions TEXT NOT NULL DEFAULT '{}'`).catch(() => {});
+    await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN locationCounts TEXT`).catch(() => {});
     // Clean up malformed hint rows from the packet.item.id bug (correct field is packet.item.item)
     await module.exports.dbExecute(`DELETE FROM game_hints WHERE itemId IS NULL`).catch(() => {});
   },
