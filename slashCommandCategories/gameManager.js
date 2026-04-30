@@ -155,7 +155,7 @@ async function doStartGame(interaction, gameId) {
     console.error('Could not create game channel:', e.message);
   }
 
-  const locationCounts = await readLocationCounts(game.gameFile);
+  const locationCounts = await readLocationCounts(game.gameFile, players.map((p) => p.name));
   await dbExecute(
     `UPDATE games SET status = 'running', port = ?, pid = ?, channelId = ?, startedAt = ?, gameOptions = ?, locationCounts = ?
      WHERE id = ?`,

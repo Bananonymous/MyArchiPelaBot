@@ -506,7 +506,7 @@ async function startLobby(interaction, explicitLobbyId) {
   const lobbyYamlDir = path.join(config.dataPath, 'temp', `lobby-${lobby.id}`);
   fs.rmSync(lobbyYamlDir, { recursive: true, force: true });
 
-  const locationCounts = await readLocationCounts(archivePath);
+  const locationCounts = await readLocationCounts(archivePath, players.map((p) => p.playerName));
   const playerData = players.map((p) => ({
     name: p.playerName,
     game: p.gameName,

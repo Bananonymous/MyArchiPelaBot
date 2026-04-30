@@ -44,7 +44,19 @@ def parse_spoiler(text):
     return result
 
 
-def main(archive_path):
+def parse_solo_spoiler(text, player_name):
+    """Fallback for single-player archives where there is no Player N: block."""
+    import re
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('Location Count:'):
+            m = re.search(r'(\d+)', stripped)
+            if m:
+                return {player_name: int(m.group(1))}
+    return {}
+
+
+def main(archive_path, player_names=None):
     if not archive_path:
         print('{}')
         return
@@ -53,19 +65,27 @@ def main(archive_path):
             spoiler = next((n for n in zf.namelist() if n.endswith('_Spoiler.txt')), None)
             if not spoiler:
                 print('{}')
-                print('[locationCounts] no spoiler file found in archive', file=sys.stderr)
+                print('no spoiler file found in archive', file=sys.stderr)
                 return
             text = zf.read(spoiler).decode('utf-8', errors='replace')
             result = parse_spoiler(text)
+            if not result and player_names and len(player_names) == 1:
+                result = parse_solo_spoiler(text, player_names[0])
             if result:
                 print(json.dumps(result))
             else:
                 print('{}')
-                print('[locationCounts] spoiler parsed but no location counts found', file=sys.stderr)
+                print('spoiler parsed but no location counts found', file=sys.stderr)
     except Exception as e:
         print('{}')
-        print(f'[locationCounts] error: {e}', file=sys.stderr)
+        print(f'error: {e}', file=sys.stderr)
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else '')
+    player_names = None
+    if len(sys.argv) > 2:
+        try:
+            player_names = json.loads(sys.argv[2])
+        except Exception:
+            pass
+    main(sys.argv[1] if len(sys.argv) > 1 else '', player_names)
