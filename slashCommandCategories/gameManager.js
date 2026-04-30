@@ -252,10 +252,15 @@ module.exports = {
         .setContexts(InteractionContextType.Guild)
         .addIntegerOption((opt) => opt
           .setName('game-id')
-          .setDescription('Game ID from /ap-generate')
-          .setRequired(true)),
+          .setDescription('Game ID (defaults to game in this channel)')
+          .setRequired(false)),
       async execute(interaction) {
-        const gameId = interaction.options.getInteger('game-id');
+        const gameId = interaction.options.getInteger('game-id') ?? (
+          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status = 'pending'", [interaction.channelId])
+        )?.id;
+        if (!gameId) {
+          return interaction.reply({ content: 'No pending game found in this channel. Specify a `game-id`.', ephemeral: true });
+        }
         return doStartGame(interaction, gameId);
       },
     },
@@ -267,13 +272,18 @@ module.exports = {
         .setContexts(InteractionContextType.Guild)
         .addIntegerOption((opt) => opt
           .setName('game-id')
-          .setDescription('Game ID to stop')
-          .setRequired(true)),
+          .setDescription('Game ID (defaults to game in this channel)')
+          .setRequired(false)),
       async execute(interaction) {
         if (!isAdmin(interaction.member)) {
           return interaction.reply({ content: 'You need Administrator permissions to stop games.', ephemeral: true });
         }
-        const gameId = interaction.options.getInteger('game-id');
+        const gameId = interaction.options.getInteger('game-id') ?? (
+          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status = 'running'", [interaction.channelId])
+        )?.id;
+        if (!gameId) {
+          return interaction.reply({ content: 'No running game found in this channel. Specify a `game-id`.', ephemeral: true });
+        }
         const game = await dbQueryOne('SELECT * FROM games WHERE id = ?', [gameId]);
         if (!game) {
           return interaction.reply({ content: `No game found with ID **${gameId}**.`, ephemeral: true });
@@ -386,13 +396,18 @@ module.exports = {
         .setContexts(InteractionContextType.Guild)
         .addIntegerOption((opt) => opt
           .setName('game-id')
-          .setDescription('Game ID to archive')
-          .setRequired(true)),
+          .setDescription('Game ID (defaults to game in this channel)')
+          .setRequired(false)),
       async execute(interaction) {
         if (!isAdmin(interaction.member)) {
           return interaction.reply({ content: 'You need Administrator permissions to archive games.', ephemeral: true });
         }
-        const gameId = interaction.options.getInteger('game-id');
+        const gameId = interaction.options.getInteger('game-id') ?? (
+          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status != 'archived'", [interaction.channelId])
+        )?.id;
+        if (!gameId) {
+          return interaction.reply({ content: 'No game found in this channel. Specify a `game-id`.', ephemeral: true });
+        }
         const game = await dbQueryOne('SELECT * FROM games WHERE id = ?', [gameId]);
         if (!game) {
           return interaction.reply({ content: `No game found with ID **${gameId}**.`, ephemeral: true });

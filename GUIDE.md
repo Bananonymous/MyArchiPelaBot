@@ -35,9 +35,9 @@
 | `/ap-list-worlds` | List custom installed APworlds |
 | `/ap-generate-solo config-file:` | Run a room from a zip or yaml file |
 | `/ap-list` | List recent games and their status |
-| `/ap-start game-id:` | Start a pending game |
-| `/ap-stop game-id:` | Stop a running game |
-| `/ap-archive game-id:` | Archive a stopped game and remove its channel |
+| `/ap-start [game-id:]` | Start a pending game (defaults to this channel) |
+| `/ap-stop [game-id:]` | Stop a running game (defaults to this channel) |
+| `/ap-archive [game-id:]` | Archive a stopped game and remove its channel (defaults to this channel) |
 | `/ap-lobby-start` | Start the lobby via command instead of the button |
 | `/ap-mc-restart game-id:` | Restart the Minecraft server for a running game |
 | `/ap-cmd command:` | Send a command to the AP server in this channel (e.g. `!hint Player "Item"`) |

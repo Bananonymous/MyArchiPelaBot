@@ -134,6 +134,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { handleNotifToggle } = require('./slashCommandCategories/gameManager');
       return handleNotifToggle(interaction, gameId);
     }
+    if (action === 'trackerhide') {
+      const gameId = parseInt(args[0], 10);
+      const { handleTrackerHide } = require('./lib/trackerUpdater');
+      return handleTrackerHide(interaction, gameId);
+    }
     if (action === 'lobbyjoin') {
       const lobbyId = parseInt(args[0], 10);
       const { joinLobbyButtonHandler } = require('./slashCommandCategories/lobbyManager');
