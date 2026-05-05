@@ -9,6 +9,8 @@ const isRomFile = (filename) => {
 
 module.exports = async (client, message) => {
   try{
+    // No guild = DM; nothing to scan and message.guild.* would throw.
+    if (!message.guild) return;
     if (!message.channel.permissionsFor(message.guild.members.me).has(PermissionsBitField.Flags.ManageMessages)) {
       console.warn(`ManageMessages permission is missing in guild ${message.guild.name} (${message.guild.id}) / ` +
           `channel ${message.channel.name} (${message.channel.id}).`);
@@ -20,6 +22,10 @@ module.exports = async (client, message) => {
 
     const channels = await message.guild.channels.fetch();
     const modChannel = channels.find((c) => c.name === 'mod-zone-chat');
+
+    // No moderator setup in this guild — short-circuit without producing messages
+    // mentioning "undefined" roles/channels.
+    if (!moderatorRole || !modChannel) return;
 
     const romFileNames = [];
     message.attachments.each((attachment) => {

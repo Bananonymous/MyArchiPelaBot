@@ -120,6 +120,11 @@ module.exports = {
         }
 
         fs.unlinkSync(filePath);
+        // Also remove from Archipelago's loaded worlds dir, otherwise entrypoint.sh's
+        // `cp -u` keeps the stale copy alive across restarts.
+        const archipelagoCopy = path.join('/opt/archipelago/worlds', `${name}.apworld`);
+        try { if (fs.existsSync(archipelagoCopy)) fs.unlinkSync(archipelagoCopy); }
+        catch (e) { console.warn(`Could not remove apworld from Archipelago dir: ${e.message}`); }
         await dbExecute('DELETE FROM apworlds WHERE name = ?', [name]);
         return interaction.reply({ content: `**${name}** removed.` });
       },

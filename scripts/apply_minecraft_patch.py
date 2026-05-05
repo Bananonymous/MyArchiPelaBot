@@ -127,6 +127,31 @@ def apply_via_extraction(patch_file, server_path, ap_server=""):
     return True, None
 
 
+def inject_server_field(server_path, ap_server):
+    """
+    Patch.AutoPatchRegister applies the patch but Archipelago does NOT populate the
+    `server` field in archipelago.json — without it the Minecraft Dig mod can't
+    auto-connect. Set it post-patch.
+    """
+    if not ap_server:
+        return
+    apdata_dir = os.path.join(server_path, "APData")
+    meta_path = os.path.join(apdata_dir, "archipelago.json")
+    if not os.path.exists(meta_path):
+        print(f"[mc-setup] archipelago.json not found at {meta_path}; cannot set server field", file=sys.stderr)
+        return
+    import json
+    try:
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+        meta["server"] = ap_server
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+        print(f"[mc-setup] Injected server={ap_server} into archipelago.json", file=sys.stderr)
+    except Exception as exc:
+        print(f"[mc-setup] Could not inject server field: {exc}", file=sys.stderr)
+
+
 def sync_mod_jar(server_path, is_dig=False):
     """Copy the mod jar from the installed apworld into the Forge server's mods/ dir."""
     game_key = "minecraft_dig" if is_dig else "minecraft"
@@ -195,6 +220,8 @@ def main():
         else:
             # Archipelago's patch system handles mod sync, but also run ours as a safety net
             sync_mod_jar(server_path, is_dig=is_dig)
+            # AP's patcher does NOT set the server field — inject it so the mod auto-connects
+            inject_server_field(server_path, ap_server)
 
         print(f"[mc-setup] Patch applied to {server_path}")
     finally:

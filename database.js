@@ -91,6 +91,21 @@ module.exports = {
       )
       `,
       `
+      CREATE TABLE IF NOT EXISTS game_items_backup (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recoveryRunId INTEGER NOT NULL,
+        gameId INTEGER NOT NULL,
+        originalId INTEGER,
+        senderName TEXT,
+        receiverName TEXT,
+        itemName TEXT,
+        locationName TEXT,
+        flags INTEGER NOT NULL DEFAULT 0,
+        sentAt INTEGER NOT NULL,
+        backedUpAt INTEGER NOT NULL
+      )
+      `,
+      `
       CREATE TABLE IF NOT EXISTS game_hints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gameId INTEGER NOT NULL,
@@ -131,6 +146,15 @@ module.exports = {
 
       // Execution is complete
       resolve();
+    });
+  }),
+
+  // INSERT and return the new row's lastID. Race-safe alternative to
+  // INSERT + SELECT WHERE someUniqueColumn = ?.
+  dbInsert: (sql, params=[]) => new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) { return reject(err); }
+      resolve(this.lastID);
     });
   }),
 

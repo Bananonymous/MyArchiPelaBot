@@ -17,7 +17,7 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const config = require('../config.json');
-const { dbExecute, dbQueryOne, dbQueryAll } = require('../database');
+const { dbExecute, dbInsert, dbQueryOne, dbQueryAll } = require('../database');
 const { isAdmin } = require('../lib/permissions');
 const yamlValidator = require('../lib/yamlValidator');
 const archipelagoRunner = require('../lib/archipelagoRunner');
@@ -234,14 +234,11 @@ module.exports = {
           });
         }
 
-        await dbExecute(
+        const lobbyId = await dbInsert(
           'INSERT INTO lobbies (guildId, channelId, creatorId, name, createdAt) VALUES (?,?,?,?,?)',
           [interaction.guildId, interaction.channelId, interaction.user.id, name, Math.floor(Date.now() / 1000)]
         );
-        const lobby = await dbQueryOne(
-          'SELECT * FROM lobbies WHERE channelId = ? ORDER BY id DESC LIMIT 1',
-          [interaction.channelId]
-        );
+        const lobby = await dbQueryOne('SELECT * FROM lobbies WHERE id = ?', [lobbyId]);
 
         const embed = await buildStatusEmbed(lobby, []);
         const row = new ActionRowBuilder().addComponents(
@@ -477,6 +474,20 @@ async function startLobby(interaction, explicitLobbyId) {
     });
   }
 
+  // Archipelago Generate fails late if two YAMLs share the same `name`. Catch it early.
+  const nameCounts = new Map();
+  for (const p of players) {
+    if (!p.playerName) continue;
+    nameCounts.set(p.playerName, (nameCounts.get(p.playerName) ?? 0) + 1);
+  }
+  const duplicates = [...nameCounts.entries()].filter(([, n]) => n > 1).map(([name]) => name);
+  if (duplicates.length) {
+    return interaction.reply({
+      content: `Duplicate player names in YAMLs (must be unique): ${duplicates.map((n) => `\`${n}\``).join(', ')}`,
+      ephemeral: true,
+    });
+  }
+
   await interaction.deferReply();
   await dbExecute("UPDATE lobbies SET status = 'generating' WHERE id = ?", [lobby.id]);
   await refreshStatusMessage(interaction, { ...lobby, status: 'generating' });
@@ -512,12 +523,12 @@ async function startLobby(interaction, explicitLobbyId) {
     game: p.gameName,
     discordUserId: /^\d+$/.test(p.userId) ? p.userId : null,
   }));
-  await dbExecute(
+  const newGameId = await dbInsert(
     `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt, locationCounts)
      VALUES (?,?,'pending',?,?,?,?)`,
     [interaction.guildId, archivePath, JSON.stringify(playerData), lobby.name, Math.floor(Date.now() / 1000), JSON.stringify(locationCounts)]
   );
-  const game = await dbQueryOne('SELECT id FROM games WHERE gameFile = ?', [archivePath]);
+  const game = { id: newGameId };
   await dbExecute("UPDATE lobbies SET status = 'done' WHERE id = ?", [lobby.id]);
 
   // Start the server

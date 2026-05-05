@@ -11,7 +11,7 @@ const {
   EmbedBuilder,
 } = require('discord.js');
 const config = require('../config.json');
-const { dbExecute, dbQueryOne } = require('../database');
+const { dbInsert } = require('../database');
 const yamlValidator = require('../lib/yamlValidator');
 const archipelagoRunner = require('../lib/archipelagoRunner');
 
@@ -109,7 +109,7 @@ module.exports = {
         fs.rmSync(workDir, { recursive: true, force: true });
 
         // Create game record
-        await dbExecute(
+        const gameId = await dbInsert(
           `INSERT INTO games (guildId, gameFile, status, players, gameName, startedAt)
            VALUES (?, ?, 'pending', ?, ?, ?)`,
           [
@@ -120,10 +120,7 @@ module.exports = {
             Math.floor(Date.now() / 1000),
           ]
         );
-        const game = await dbQueryOne(
-          'SELECT id FROM games WHERE gameFile = ?',
-          [archivePath]
-        );
+        const game = { id: gameId };
 
         const embed = new EmbedBuilder()
           .setTitle(`Game Ready: ${gameName}`)

@@ -438,7 +438,7 @@ module.exports = {
         .setContexts(InteractionContextType.Guild)
         .addStringOption((opt) => opt
           .setName('command')
-          .setDescription('Command to send, e.g. !hint Bananonymous "Empowering Jumps"')
+          .setDescription('Server console command, e.g. /hint Bananonymous Empowering Jumps')
           .setRequired(true)),
       async execute(interaction) {
         if (!isAdmin(interaction.member)) {
@@ -513,10 +513,33 @@ module.exports = {
           ...(itemRows ?? []).map((r) => `/send_multiple ${r.cnt} ${r.receiverName} ${r.itemName}`),
         ];
 
-        const ok = processManager.sendBatch(gameId, commands);
-        if (!ok) return interaction.editReply({ content: 'Server process not found — game may have crashed.' });
+        // Snapshot game_items to game_items_backup BEFORE any destructive op,
+        // so /ap-recover-undo can restore if the resends don't repopulate.
+        const recoveryRunId = Date.now();
+        const now = Math.floor(Date.now() / 1000);
+        if (playerFilter) {
+          await dbExecute(
+            `INSERT INTO game_items_backup
+               (recoveryRunId, gameId, originalId, senderName, receiverName, itemName, locationName, flags, sentAt, backedUpAt)
+             SELECT ?, gameId, id, senderName, receiverName, itemName, locationName, flags, sentAt, ?
+             FROM game_items WHERE gameId = ? AND (senderName = ? OR receiverName = ?)`,
+            [recoveryRunId, now, gameId, playerFilter, playerFilter]
+          );
+        } else {
+          await dbExecute(
+            `INSERT INTO game_items_backup
+               (recoveryRunId, gameId, originalId, senderName, receiverName, itemName, locationName, flags, sentAt, backedUpAt)
+             SELECT ?, gameId, id, senderName, receiverName, itemName, locationName, flags, sentAt, ?
+             FROM game_items WHERE gameId = ?`,
+            [recoveryRunId, now, gameId]
+          );
+        }
 
-        // Clear DB before AP re-fires ItemSend events to avoid double-counting
+        const ok = processManager.sendBatch(gameId, commands);
+        if (!ok) return interaction.editReply({ content: 'Server process not found — game may have crashed. (No DB changes made.)' });
+
+        // Clear DB so AP-refired ItemSend events repopulate without double-counting.
+        // The snapshot above can be restored via /ap-recover-undo if refire fails.
         if (playerFilter) {
           await dbExecute('DELETE FROM game_items WHERE gameId = ? AND (senderName = ? OR receiverName = ?)', [gameId, playerFilter, playerFilter]);
         } else {
@@ -527,7 +550,72 @@ module.exports = {
         const totalLoc = locRows?.length ?? 0;
         const totalItem = (itemRows ?? []).reduce((s, r) => s + r.cnt, 0);
         return interaction.editReply({
-          content: `Recovery sent: ${totalLoc} location checks (${senders.join(', ')}) + ${totalItem} fallback items. DB cleared — notifier will repopulate from AP events.`,
+          content:
+            `Recovery sent: ${totalLoc} location checks (${senders.join(', ')}) + ${totalItem} fallback items.\n` +
+            `Snapshot saved — recovery ID **${recoveryRunId}**.\n` +
+            `If items don't repopulate after a few seconds, run \`/ap-recover-undo recovery-id:${recoveryRunId}\` to restore.`,
+        });
+      },
+    },
+
+    {
+      commandBuilder: new SlashCommandBuilder()
+        .setName('ap-recover-undo')
+        .setDescription('Restore game_items from a recovery snapshot. (Admin only)')
+        .setContexts(InteractionContextType.Guild)
+        .addIntegerOption((opt) => opt
+          .setName('recovery-id')
+          .setDescription('Recovery ID returned by /ap-recover (defaults to most recent for this game)')
+          .setRequired(false))
+        .addIntegerOption((opt) => opt
+          .setName('game-id')
+          .setDescription('Game ID (defaults to game in this channel)')
+          .setRequired(false)),
+      async execute(interaction) {
+        if (!isAdmin(interaction.member)) {
+          return interaction.reply({ content: 'You need Administrator permissions.', ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+
+        let gameId = interaction.options.getInteger('game-id');
+        if (!gameId) {
+          const game = await dbQueryOne(
+            "SELECT id FROM games WHERE channelId = ?",
+            [interaction.channelId]
+          );
+          if (!game) return interaction.editReply({ content: 'No game found in this channel.' });
+          gameId = game.id;
+        }
+
+        let recoveryRunId = interaction.options.getInteger('recovery-id');
+        if (!recoveryRunId) {
+          const latest = await dbQueryOne(
+            'SELECT recoveryRunId FROM game_items_backup WHERE gameId = ? ORDER BY recoveryRunId DESC LIMIT 1',
+            [gameId]
+          );
+          if (!latest) return interaction.editReply({ content: 'No recovery snapshots found for this game.' });
+          recoveryRunId = latest.recoveryRunId;
+        }
+
+        const snap = await dbQueryAll(
+          'SELECT * FROM game_items_backup WHERE gameId = ? AND recoveryRunId = ?',
+          [gameId, recoveryRunId]
+        );
+        if (!snap) return interaction.editReply({ content: `No snapshot found for game ${gameId}, recovery ${recoveryRunId}.` });
+
+        // Wipe current rows and re-insert from snapshot. Do NOT touch the snapshot
+        // itself so a second undo is still possible.
+        await dbExecute('DELETE FROM game_items WHERE gameId = ?', [gameId]);
+        for (const row of snap) {
+          await dbExecute(
+            `INSERT INTO game_items (gameId, senderName, receiverName, itemName, locationName, flags, sentAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [row.gameId, row.senderName, row.receiverName, row.itemName, row.locationName, row.flags, row.sentAt]
+          );
+        }
+
+        return interaction.editReply({
+          content: `Restored ${snap.length} item rows for game ${gameId} from recovery snapshot ${recoveryRunId}.`,
         });
       },
     },
