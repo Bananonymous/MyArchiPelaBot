@@ -149,6 +149,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { lobbyOptionsHandler } = require('./slashCommandCategories/lobbyManager');
       return lobbyOptionsHandler(interaction, lobbyId);
     }
+    if (action === 'joinchannel') {
+      const channelId = args[0];
+      try {
+        const channel = await interaction.guild.channels.fetch(channelId);
+        await channel.permissionOverwrites.edit(interaction.user.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+        });
+        await interaction.reply({ content: `You now have access to <#${channelId}>!`, ephemeral: true });
+      } catch (e) {
+        await interaction.reply({ content: 'Could not grant access. Ask an admin.', ephemeral: true });
+      }
+      return;
+    }
   }
 
   if (interaction.isModalSubmit()) {

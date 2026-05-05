@@ -13,6 +13,6 @@ services:
       - ~/Minecraft:/opt/minecraft
       # Let's Encrypt certs for WSS support on AP server ports (optional).
       # Certs live at ~/botc-assistant/ssl/certbot/conf on this host.
-      - ~/botc-assistant/ssl/certbot/conf:/etc/letsencrypt:ro
+      - /opt/botc-assistant/ssl/certbot/conf:/etc/letsencrypt:ro
     environment:
       - NODE_ENV=production

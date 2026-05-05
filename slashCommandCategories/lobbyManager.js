@@ -560,14 +560,11 @@ async function startLobby(interaction, explicitLobbyId) {
       type: ChannelType.GuildText,
       topic: `Archipelago: ${lobby.name} | ${config.serverHost}:${port}`,
       permissionOverwrites: [
-        // Hide from everyone by default
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        // Grant access to each player who joined
         ...discordUserIds.map((userId) => ({
           id: userId,
           allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
         })),
-        // Ensure the bot can always see and manage the channel
         {
           id: interaction.client.user.id,
           allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
@@ -651,9 +648,9 @@ async function startLobby(interaction, explicitLobbyId) {
       const components = channelId ? [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
+            .setCustomId(`joinchannel_${channelId}`)
             .setLabel('Join Channel')
-            .setStyle(ButtonStyle.Link)
-            .setURL(`https://discord.com/channels/${lobby.guildId}/${channelId}`),
+            .setStyle(ButtonStyle.Primary),
         ),
       ] : [];
       await msg.edit({ embeds: [startedEmbed], components });
