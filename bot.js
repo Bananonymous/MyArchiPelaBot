@@ -13,11 +13,21 @@ process.on('unhandledRejection', (err) => generalErrorHandler(err));
 process.on('SIGTERM', () => {
   console.info('SIGTERM received — shutting down.');
   const processManager = require('./lib/processManager');
-  for (const [gameId, entry] of processManager.getAllRunning()) {
+  const entries = [...processManager.getAllRunning().values()];
+  for (const entry of entries) {
     try { entry.client?.close(); } catch (_) {}
-    try { entry.process?.kill('SIGTERM'); } catch (_) {}
+    try { entry.process?.kill('SIGINT'); } catch (_) {}
   }
-  process.exit(0);
+  if (entries.length === 0) { process.exit(0); return; }
+  // Wait for AP processes to save before exiting; force-exit after 8s
+  const timeout = setTimeout(() => process.exit(0), 8000);
+  let remaining = entries.length;
+  for (const entry of entries) {
+    entry.process.once('exit', () => {
+      remaining--;
+      if (remaining === 0) { clearTimeout(timeout); process.exit(0); }
+    });
+  }
 });
 
 async function init() {

@@ -465,5 +465,71 @@ module.exports = {
         });
       },
     },
+    {
+      commandBuilder: new SlashCommandBuilder()
+        .setName('ap-recover')
+        .setDescription('Re-send items from DB to AP server (use after save loss). (Admin only)')
+        .setContexts(InteractionContextType.Guild)
+        .addIntegerOption((opt) => opt
+          .setName('game-id')
+          .setDescription('Game ID to recover (defaults to game in this channel)'))
+        .addStringOption((opt) => opt
+          .setName('player')
+          .setDescription('Player name to recover (defaults to all players)')),
+      async execute(interaction) {
+        if (!isAdmin(interaction.member)) {
+          return interaction.reply({ content: 'You need Administrator permissions.', ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+
+        let gameId = interaction.options.getInteger('game-id');
+        if (!gameId) {
+          const game = await dbQueryOne(
+            "SELECT id FROM games WHERE channelId = ? AND status = 'running'",
+            [interaction.channelId]
+          );
+          if (!game) return interaction.editReply({ content: 'No running game found in this channel.' });
+          gameId = game.id;
+        }
+
+        const playerFilter = interaction.options.getString('player');
+
+        // Primary: restore by location (restores check count + sends item to receiver)
+        const locRows = playerFilter
+          ? await dbQueryAll('SELECT DISTINCT senderName, locationName FROM game_items WHERE gameId = ? AND senderName = ? AND locationName IS NOT NULL', [gameId, playerFilter])
+          : await dbQueryAll('SELECT DISTINCT senderName, locationName FROM game_items WHERE gameId = ? AND locationName IS NOT NULL', [gameId]);
+
+        // Fallback: items with no locationName recorded — restore by receiver
+        const itemRows = playerFilter
+          ? await dbQueryAll('SELECT receiverName, itemName, COUNT(*) as cnt FROM game_items WHERE gameId = ? AND receiverName = ? AND locationName IS NULL GROUP BY receiverName, itemName', [gameId, playerFilter])
+          : await dbQueryAll('SELECT receiverName, itemName, COUNT(*) as cnt FROM game_items WHERE gameId = ? AND locationName IS NULL GROUP BY receiverName, itemName', [gameId]);
+
+        if ((!locRows || locRows.length === 0) && (!itemRows || itemRows.length === 0)) {
+          return interaction.editReply({ content: 'No items found in DB for this game.' });
+        }
+
+        const commands = [
+          ...(locRows ?? []).map((r) => `/send_location ${r.senderName} ${r.locationName}`),
+          ...(itemRows ?? []).map((r) => `/send_multiple ${r.cnt} ${r.receiverName} ${r.itemName}`),
+        ];
+
+        const ok = processManager.sendBatch(gameId, commands);
+        if (!ok) return interaction.editReply({ content: 'Server process not found — game may have crashed.' });
+
+        // Clear DB before AP re-fires ItemSend events to avoid double-counting
+        if (playerFilter) {
+          await dbExecute('DELETE FROM game_items WHERE gameId = ? AND (senderName = ? OR receiverName = ?)', [gameId, playerFilter, playerFilter]);
+        } else {
+          await dbExecute('DELETE FROM game_items WHERE gameId = ?', [gameId]);
+        }
+
+        const senders = [...new Set((locRows ?? []).map((r) => r.senderName))];
+        const totalLoc = locRows?.length ?? 0;
+        const totalItem = (itemRows ?? []).reduce((s, r) => s + r.cnt, 0);
+        return interaction.editReply({
+          content: `Recovery sent: ${totalLoc} location checks (${senders.join(', ')}) + ${totalItem} fallback items. DB cleared — notifier will repopulate from AP events.`,
+        });
+      },
+    },
   ],
 };
