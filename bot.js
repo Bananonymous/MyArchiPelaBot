@@ -183,6 +183,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { lobbyOptionsHandler } = require('./slashCommandCategories/lobbyManager');
       return lobbyOptionsHandler(interaction, lobbyId);
     }
+    if (action === 'lobbyremove') {
+      const lobbyId = parseInt(args[0], 10);
+      const { lobbyRemoveHandler } = require('./slashCommandCategories/lobbyManager');
+      return lobbyRemoveHandler(interaction, lobbyId);
+    }
     if (action === 'joinchannel') {
       const channelId = args[0];
       try {
@@ -236,6 +241,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const optKey = args.slice(0, -1).join('_'); // e.g. 'release', 'collect', 'remaining'
       const { lobbyOptSelectHandler } = require('./slashCommandCategories/lobbyManager');
       return lobbyOptSelectHandler(interaction, lobbyId, optKey);
+    }
+    if (action === 'lobbyremoveplayer') {
+      const lobbyId = parseInt(args[0], 10);
+      const { lobbyRemoveSelectHandler } = require('./slashCommandCategories/lobbyManager');
+      return lobbyRemoveSelectHandler(interaction, lobbyId);
     }
   }
 });

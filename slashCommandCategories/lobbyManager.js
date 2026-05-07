@@ -251,6 +251,10 @@ module.exports = {
             .setLabel('⚙️ Options')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
+            .setCustomId(`lobbyremove_${lobby.id}`)
+            .setLabel('Remove Player')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
             .setCustomId(`lobbystart_${lobby.id}`)
             .setLabel('Start Game')
             .setStyle(ButtonStyle.Success),
@@ -262,6 +266,40 @@ module.exports = {
 
         const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
         await dbExecute('UPDATE lobbies SET statusMessageId = ? WHERE id = ?', [msg.id, lobby.id]);
+      },
+    },
+
+    {
+      commandBuilder: new SlashCommandBuilder()
+        .setName('ap-lobby-remove')
+        .setDescription('Remove a player from the open lobby. (Admin/creator only)')
+        .setContexts(InteractionContextType.Guild)
+        .addStringOption((opt) => opt
+          .setName('player')
+          .setDescription('Player slot key (userId or behalf_name)')
+          .setRequired(true)),
+      async execute(interaction) {
+        const lobby = await dbQueryOne(
+          "SELECT * FROM lobbies WHERE guildId = ? AND channelId = ? AND status = 'open'",
+          [interaction.guildId, interaction.channelId]
+        );
+        if (!lobby) return interaction.reply({ content: 'No open lobby in this channel.', ephemeral: true });
+        if (lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
+          return interaction.reply({ content: 'Only the lobby creator or an admin can remove players.', ephemeral: true });
+        }
+        const slotKey = interaction.options.getString('player');
+        const entry = await dbQueryOne('SELECT * FROM lobby_players WHERE lobbyId = ? AND userId = ?', [lobby.id, slotKey]);
+        if (!entry) return interaction.reply({ content: `No player with key \`${slotKey}\` in this lobby.`, ephemeral: true });
+
+        if (entry.yamlPath && fs.existsSync(entry.yamlPath)) {
+          try { fs.unlinkSync(entry.yamlPath); } catch (_) {}
+        }
+        await dbExecute('DELETE FROM lobby_players WHERE lobbyId = ? AND userId = ?', [lobby.id, slotKey]);
+        await refreshStatusMessage(interaction, lobby);
+        return interaction.reply({
+          content: `Removed **${entry.playerName ?? slotKey}** from the lobby.`,
+          ephemeral: true,
+        });
       },
     },
 
@@ -420,6 +458,8 @@ module.exports = {
   cancelLobbyHandler: (interaction, lobbyId) => cancelLobby(interaction, lobbyId),
   lobbyOptionsHandler: (interaction, lobbyId) => lobbyOptions(interaction, lobbyId),
   lobbyOptSelectHandler: (interaction, lobbyId, optKey) => lobbyOptSelect(interaction, lobbyId, optKey),
+  lobbyRemoveHandler: (interaction, lobbyId) => lobbyRemove(interaction, lobbyId),
+  lobbyRemoveSelectHandler: (interaction, lobbyId) => lobbyRemoveSelect(interaction, lobbyId),
 };
 
 async function lobbyOptions(interaction, lobbyId) {
@@ -703,4 +743,57 @@ async function cancelLobby(interaction, explicitLobbyId) {
   await deleteStatusMessage(interaction, lobby);
 
   return interaction.reply({ content: `Lobby **${lobby.name}** (ID:${lobby.id}) cancelled.` });
+}
+
+async function lobbyRemove(interaction, lobbyId) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.reply({ content: 'This lobby is no longer open.', ephemeral: true });
+  if (lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
+    return interaction.reply({ content: 'Only the lobby creator or an admin can remove players.', ephemeral: true });
+  }
+
+  const players = await dbQueryAll('SELECT * FROM lobby_players WHERE lobbyId = ?', [lobbyId]);
+  if (!players || players.length === 0) {
+    return interaction.reply({ content: 'No players in this lobby.', ephemeral: true });
+  }
+
+  const options = players.map((p) => ({
+    label: p.playerName ?? p.userId,
+    description: p.gameName ? `${p.gameName}${/^\d+$/.test(p.userId) ? '' : ' (on-behalf)'}` : (p.userId),
+    value: p.userId,
+  }));
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lobbyremoveplayer_${lobbyId}`)
+    .setPlaceholder('Select player to remove')
+    .addOptions(options);
+
+  return interaction.reply({
+    content: 'Select a player to remove:',
+    components: [new ActionRowBuilder().addComponents(select)],
+    ephemeral: true,
+  });
+}
+
+async function lobbyRemoveSelect(interaction, lobbyId) {
+  const lobby = await dbQueryOne("SELECT * FROM lobbies WHERE id = ? AND status = 'open'", [lobbyId]);
+  if (!lobby) return interaction.update({ content: 'This lobby is no longer open.', components: [] });
+  if (lobby.creatorId !== interaction.user.id && !isAdmin(interaction.member)) {
+    return interaction.update({ content: 'Only the lobby creator or an admin can remove players.', components: [] });
+  }
+
+  const slotKey = interaction.values[0];
+  const entry = await dbQueryOne('SELECT * FROM lobby_players WHERE lobbyId = ? AND userId = ?', [lobbyId, slotKey]);
+  if (!entry) return interaction.update({ content: 'Player not found (already removed?).', components: [] });
+
+  if (entry.yamlPath && fs.existsSync(entry.yamlPath)) {
+    try { fs.unlinkSync(entry.yamlPath); } catch (_) {}
+  }
+  await dbExecute('DELETE FROM lobby_players WHERE lobbyId = ? AND userId = ?', [lobbyId, slotKey]);
+  await refreshStatusMessage(interaction, lobby);
+
+  return interaction.update({
+    content: `Removed **${entry.playerName ?? slotKey}** from the lobby.`,
+    components: [],
+  });
 }
