@@ -105,7 +105,7 @@ async function doStartGame(interaction, gameId) {
     const fields = [
       { name: 'Game ID', value: String(gameId), inline: true },
       { name: 'AP Port', value: String(port), inline: true },
-      { name: 'AP Connect', value: `\`${config.serverHost}:${port}\`${config.ssl?.cert ? ' (WSS enabled)' : ''}`, inline: false },
+      { name: 'AP Connect', value: config.ssl?.cert ? `\`wss://${config.serverHost}:${port}\`` : `\`${config.serverHost}:${port}\``, inline: false },
       {
         name: 'Players',
         value: players.length ? players.map((p) => `${p.name} (${p.game})`).join('\n') : '_Unknown_',

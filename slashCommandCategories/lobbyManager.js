@@ -585,7 +585,7 @@ async function startLobby(interaction, explicitLobbyId) {
     channelId = channel.id;
 
     const fields = [
-      { name: 'Connect', value: `\`${config.serverHost}:${port}\`${config.ssl?.cert ? ' (WSS enabled)' : ''}`, inline: false },
+      { name: 'Connect', value: config.ssl?.cert ? `\`wss://${config.serverHost}:${port}\`` : `\`${config.serverHost}:${port}\``, inline: false },
       { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
     ];
     if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:25565\``, inline: false });
