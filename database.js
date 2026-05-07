@@ -123,12 +123,21 @@ module.exports = {
         UNIQUE(gameId, receivingSlot, finderSlot, itemId, locationId)
       )
       `
+      ,
+      `
+      CREATE TABLE IF NOT EXISTS port_reservations (
+        port INTEGER NOT NULL PRIMARY KEY,
+        gameId INTEGER NOT NULL,
+        reservedAt INTEGER NOT NULL
+      )
+      `
     ];
     for (let query of tableQueries) {
       await module.exports.dbExecute(query);
     }
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN feedLevel TEXT NOT NULL DEFAULT 'none'`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN trackerMessageId TEXT`).catch(() => {});
+    await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN trackerMessageIds TEXT`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE lobbies ADD COLUMN options TEXT`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN gameOptions TEXT NOT NULL DEFAULT '{}'`).catch(() => {});
     await module.exports.dbExecute(`ALTER TABLE games ADD COLUMN locationCounts TEXT`).catch(() => {});
@@ -136,6 +145,11 @@ module.exports = {
     await module.exports.dbExecute(`UPDATE player_trackers SET hideFound = 1 WHERE hideFound = 0`).catch(() => {});
     // Clean up malformed hint rows from the packet.item.id bug (correct field is packet.item.item)
     await module.exports.dbExecute(`DELETE FROM game_hints WHERE itemId IS NULL`).catch(() => {});
+
+    // Ensure we can't reserve the same port twice.
+    await module.exports.dbExecute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS port_reservations_gameId_idx ON port_reservations(gameId)`
+    ).catch(() => {});
   },
 
   // Execute a query on the database

@@ -532,7 +532,7 @@ async function startLobby(interaction, explicitLobbyId) {
   await dbExecute("UPDATE lobbies SET status = 'done' WHERE id = ?", [lobby.id]);
 
   // Start the server
-  const port = portManager.allocate();
+  const port = await portManager.allocateForGame(game.id);
   if (!port) {
     return interaction.followUp({ content: 'No ports available. Stop a running game first.' });
   }
@@ -541,7 +541,7 @@ async function startLobby(interaction, explicitLobbyId) {
   try {
     pid = await processManager.start(game.id, archivePath, port, playerData, parseOptions(lobby.options));
   } catch (e) {
-    portManager.release(port);
+    await portManager.release(port);
     return interaction.followUp({ content: `Generation succeeded but server failed to start: \`${e.message}\`` });
   }
 

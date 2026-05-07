@@ -55,7 +55,7 @@ async function doStartGame(interaction, gameId) {
     });
   }
 
-  const port = portManager.allocate();
+  const port = await portManager.allocateForGame(gameId);
   if (!port) {
     return interaction.reply({ content: 'No ports available. Stop a running game first.', ephemeral: true });
   }
@@ -73,7 +73,7 @@ async function doStartGame(interaction, gameId) {
   try {
     pid = await processManager.start(gameId, game.gameFile, port, players);
   } catch (e) {
-    portManager.release(port);
+    await portManager.release(port);
     return interaction.followUp({ content: `Failed to start server: \`${e.message}\`` });
   }
 
@@ -294,7 +294,7 @@ module.exports = {
 
         processManager.stop(gameId);
         minecraftManager.stop(gameId);
-        portManager.release(game.port);
+        await portManager.release(game.port);
         const now = Math.floor(Date.now() / 1000);
         await dbExecute(
           "UPDATE games SET status = 'archived', endedAt = ? WHERE id = ?",
@@ -392,7 +392,7 @@ module.exports = {
     {
       commandBuilder: new SlashCommandBuilder()
         .setName('ap-archive')
-        .setDescription('Mark a game as archived. (Admin only)')
+        .setDescription('Stop (if running) and archive a game. (Admin only)')
         .setContexts(InteractionContextType.Guild)
         .addIntegerOption((opt) => opt
           .setName('game-id')
@@ -402,32 +402,47 @@ module.exports = {
         if (!isAdmin(interaction.member)) {
           return interaction.reply({ content: 'You need Administrator permissions to archive games.', ephemeral: true });
         }
-        const gameId = interaction.options.getInteger('game-id') ?? (
-          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status != 'archived'", [interaction.channelId])
+        await interaction.deferReply({ ephemeral: true });
+
+        const explicitGameId = interaction.options.getInteger('game-id');
+        const gameId = explicitGameId ?? (
+          await dbQueryOne("SELECT id FROM games WHERE channelId = ? AND status != 'archived' ORDER BY id DESC LIMIT 1", [interaction.channelId])
         )?.id;
         if (!gameId) {
-          return interaction.reply({ content: 'No game found in this channel. Specify a `game-id`.', ephemeral: true });
+          return interaction.editReply({ content: 'No game found in this channel. Specify a `game-id`.' });
         }
         const game = await dbQueryOne('SELECT * FROM games WHERE id = ?', [gameId]);
         if (!game) {
-          return interaction.reply({ content: `No game found with ID **${gameId}**.`, ephemeral: true });
+          return interaction.editReply({ content: `No game found with ID **${gameId}**.` });
         }
-        if (game.status === 'running') {
-          return interaction.reply({
-            content: 'Stop the game first with `/ap-stop` before archiving.',
-            ephemeral: true,
-          });
-        }
-        await dbExecute("UPDATE games SET status = 'archived' WHERE id = ?", [gameId]);
 
-        if (game.channelId) {
+        // Stop first if needed (same behavior as /ap-stop)
+        if (game.status === 'running') {
+          try { processManager.stop(gameId); } catch (_) {}
+          try { minecraftManager.stop(gameId); } catch (_) {}
+          if (game.port) {
+            try { await portManager.release(game.port); } catch (_) {}
+          } else {
+            // In case port wasn't persisted for some reason, also clear any reservation.
+            try { await portManager.releaseByGameId(gameId); } catch (_) {}
+          }
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        await dbExecute("UPDATE games SET status = 'archived', endedAt = ? WHERE id = ?", [now, gameId]);
+
+        // Channel deletion behavior:
+        // - If /ap-archive is run *inside* a game channel (no game-id provided), delete the current channel.
+        // - If a game-id is provided, delete the game's recorded channelId.
+        const targetChannelId = explicitGameId ? game.channelId : interaction.channelId;
+        if (targetChannelId) {
           try {
-            const ch = await interaction.guild.channels.fetch(game.channelId);
+            const ch = await interaction.guild.channels.fetch(targetChannelId);
             if (ch) await ch.delete(`Archived game #${gameId}`);
           } catch (_) {}
         }
 
-        return interaction.reply({ content: `Game **${game.gameName}** (ID ${gameId}) archived and channel removed.` });
+        return interaction.editReply({ content: `Game **${game.gameName}** (ID ${gameId}) archived and channel removed.` });
       },
     },
 

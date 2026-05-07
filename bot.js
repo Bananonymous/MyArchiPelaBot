@@ -2,6 +2,7 @@ const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const config = require('./config.json');
 const { cachePartial } = require('./lib');
 const { dbInit } = require('./database');
+const { dbQueryOne } = require('./database');
 const { generalErrorHandler } = require('./errorHandlers');
 const portManager = require('./lib/portManager');
 const fs = require('fs');
@@ -83,7 +84,11 @@ fs.readdirSync('./voiceStateListeners').filter((file) => file.endsWith('.js')).f
 fs.readdirSync('./routines').filter((file) => file.endsWith('.js')).forEach((routineFile) => {
   const routine = require(`./routines/${routineFile}`);
   const intervalMs = routineFile === 'gameMonitor.js' ? 60_000 : 3_600_000;
-  setInterval(() => routine(client), intervalMs);
+  setInterval(() => {
+    Promise.resolve()
+      .then(() => routine(client))
+      .catch((e) => console.error(`[routine:${routineFile}] error:`, e));
+  }, intervalMs);
 });
 
 // Run messages through the listeners
@@ -92,19 +97,38 @@ client.on(Events.MessageCreate, async (msg) => {
   if (message.member) { message.member = await cachePartial(message.member); }
   if (message.author) { message.author = await cachePartial(message.author); }
   if (message.author.bot) { return; }
-  return client.messageListeners.forEach((listener) => listener(client, message));
+  for (const listener of client.messageListeners) {
+    try {
+      // Allow both sync and async listeners; always await so errors are caught here.
+      await listener(client, message);
+    } catch (e) {
+      console.error('[messageListener] error:', e);
+    }
+  }
 });
 
 // Run channelDelete events through their listeners
 client.on(Events.ChannelDelete, async (channel) => {
-  client.channelDeletedListeners.forEach((listener) => listener(client, channel));
+  for (const listener of client.channelDeletedListeners) {
+    try {
+      await listener(client, channel);
+    } catch (e) {
+      console.error('[channelDeletedListener] error:', e);
+    }
+  }
 });
 
 // Run the voice states through the listeners
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   oldState.member = await cachePartial(oldState.member);
   newState.member = await cachePartial(newState.member);
-  client.voiceStateListeners.forEach((listener) => listener(client, oldState, newState));
+  for (const listener of client.voiceStateListeners) {
+    try {
+      await listener(client, oldState, newState);
+    } catch (e) {
+      console.error('[voiceStateListener] error:', e);
+    }
+  }
 });
 
 // Run interactions through slash command and button handlers
@@ -162,7 +186,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (action === 'joinchannel') {
       const channelId = args[0];
       try {
+        // Intentionally open invite: anyone can join the *game* channel.
+        // Security constraint: only allow this button to grant access to a channel that
+        // is recorded as a game channel in the DB (prevents arbitrary channel escalation).
+        const game = await dbQueryOne(
+          "SELECT id FROM games WHERE channelId = ? AND status != 'archived' ORDER BY id DESC LIMIT 1",
+          [channelId]
+        );
+        if (!game) {
+          return interaction.reply({ content: 'This join link is no longer valid.', ephemeral: true });
+        }
+
         const channel = await interaction.guild.channels.fetch(channelId);
+        if (!channel || channel.guildId !== interaction.guildId) {
+          return interaction.reply({ content: 'Could not grant access. Ask an admin.', ephemeral: true });
+        }
+
         await channel.permissionOverwrites.edit(interaction.user.id, {
           ViewChannel: true,
           SendMessages: true,

@@ -28,7 +28,7 @@ module.exports = async function gameMonitor(client) {
       "UPDATE games SET status = 'crashed', endedAt = ? WHERE id = ?",
       [now, game.id]
     );
-    portManager.release(game.port);
+    await portManager.release(game.port);
     minecraftManager.stop(game.id);
 
     if (game.channelId) {
