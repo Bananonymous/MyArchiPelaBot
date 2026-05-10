@@ -19,6 +19,22 @@ Discord bot for self-hosting [Archipelago](https://archipelago.gg) multiworld ga
 - Node.js + npm
 - Archipelago installed at `/opt/archipelago` with `ArchipelagoGenerate` and `ArchipelagoServer` on `PATH`
 - Docker + Docker Compose (recommended for deployment)
+- A server with open ports (one per concurrent game, default range 38281–38380) reachable by players
+
+## Creating the Discord application
+
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application**
+2. Under **Bot**: click **Add Bot**, then **Reset Token** → copy the token → this is your `token` in `config.json`
+3. Under **General Information**: copy **Application ID** → this is your `clientId`
+4. Under **Bot**: enable **Message Content Intent** (required for ROM file scanning)
+5. Under **OAuth2 → URL Generator**:
+   - Scopes: `bot`, `applications.commands`
+   - Bot permissions: use integer `274878032960` or tick the permissions listed below
+6. Open the generated URL → select your server → **Authorize**
+
+To get your server (guild) ID: enable Developer Mode in Discord settings, right-click your server → **Copy Server ID** → this is your `guildIds` entry.
+
+To get a role ID for `adminRoles`: right-click the role in Server Settings → **Copy Role ID**.
 
 ## Configuration
 
