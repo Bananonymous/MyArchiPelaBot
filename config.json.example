@@ -15,7 +15,7 @@
 
   "_comment_ssl": "Optional: enable WSS on AP server ports (required for browser clients on HTTPS pages)",
   "ssl": {
-    "cert": "/etc/letsencrypt/live/lesidiotsduvillage.ch/fullchain.pem",
-    "key": "/etc/letsencrypt/live/lesidiotsduvillage.ch/privkey.pem"
+    "cert": "/etc/letsencrypt/live/your.domain/fullchain.pem",
+    "key": "/etc/letsencrypt/live/your.domain/privkey.pem"
   }
 }
