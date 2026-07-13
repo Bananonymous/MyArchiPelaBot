@@ -632,7 +632,7 @@ async function startLobby(interaction, explicitLobbyId) {
     else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
 
     const startEmbed = new EmbedBuilder()
-      .setTitle(`Game Started: ${lobby.name} (ID:${lobby.id})`)
+      .setTitle(`Game Started: ${lobby.name} (ID:${game.id})`)
       .setColor(0x00cc44)
       .addFields(fields)
       .setTimestamp();
@@ -688,7 +688,7 @@ async function startLobby(interaction, explicitLobbyId) {
       const lobbyChannel = await interaction.client.channels.fetch(lobby.channelId);
       const msg = await lobbyChannel.messages.fetch(lobby.statusMessageId);
       const startedEmbed = new EmbedBuilder()
-        .setTitle(`Game Started: ${lobby.name} (ID:${lobby.id})`)
+        .setTitle(`Game Started: ${lobby.name} (ID:${game.id})`)
         .setColor(0x00cc44)
         .addFields(
           { name: 'Status', value: 'Running', inline: true },
@@ -709,7 +709,7 @@ async function startLobby(interaction, explicitLobbyId) {
   }
 
   return interaction.followUp({
-    content: `**${lobby.name}** (ID:${lobby.id}) is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
+    content: `**${lobby.name}** (ID:${game.id}) is live!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
   });
 }
 
