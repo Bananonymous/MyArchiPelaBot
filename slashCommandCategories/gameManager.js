@@ -81,9 +81,10 @@ async function doStartGame(interaction, gameId) {
 
   let mcStarted = false;
   let mcError = null;
+  let mcPort = null;
   if (minecraftManager.isMinecraftGame(players)) {
     try {
-      await minecraftManager.start(gameId, game.gameFile, `${config.serverHost}:${port}`);
+      ({ port: mcPort } = await minecraftManager.start(gameId, game.gameFile, `${config.serverHost}:${port}`));
       mcStarted = true;
     } catch (e) {
       mcError = e.message;
@@ -113,7 +114,7 @@ async function doStartGame(interaction, gameId) {
     ];
 
     if (mcStarted) {
-      fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:25565\``, inline: false });
+      fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:${mcPort}\``, inline: false });
     } else if (mcError) {
       fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
     }
@@ -414,13 +415,14 @@ module.exports = {
         await interaction.deferReply();
 
         minecraftManager.stop(gameId);
+        let mcPort;
         try {
-          await minecraftManager.start(gameId, game.gameFile, `${config.serverHost}:${game.port}`);
+          ({ port: mcPort } = await minecraftManager.start(gameId, game.gameFile, `${config.serverHost}:${game.port}`));
         } catch (e) {
           return interaction.followUp({ content: `Failed to restart Minecraft server: \`${e.message}\`` });
         }
 
-        return interaction.followUp({ content: `Minecraft server for **${game.gameName}** restarted. Connect at \`${config.serverHost}:25565\`.` });
+        return interaction.followUp({ content: `Minecraft server for **${game.gameName}** restarted. Connect at \`${config.serverHost}:${mcPort}\`.` });
       },
     },
 

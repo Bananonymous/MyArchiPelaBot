@@ -588,9 +588,10 @@ async function startLobby(interaction, explicitLobbyId) {
   // Start Minecraft server if any player uses a Minecraft game
   let mcStarted = false;
   let mcError = null;
+  let mcPort = null;
   if (minecraftManager.isMinecraftGame(playerData)) {
     try {
-      await minecraftManager.start(game.id, archivePath, `${config.serverHost}:${port}`);
+      ({ port: mcPort } = await minecraftManager.start(game.id, archivePath, `${config.serverHost}:${port}`));
       mcStarted = true;
     } catch (e) {
       mcError = e.message;
@@ -628,7 +629,7 @@ async function startLobby(interaction, explicitLobbyId) {
       { name: 'Connect', value: config.ssl?.cert ? `\`wss://${config.serverHost}:${port}\`` : `\`${config.serverHost}:${port}\``, inline: false },
       { name: 'Players', value: playerData.map((p) => `${p.name} (${p.game})`).join('\n') },
     ];
-    if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:25565\``, inline: false });
+    if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:${mcPort}\``, inline: false });
     else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
 
     const startEmbed = new EmbedBuilder()
