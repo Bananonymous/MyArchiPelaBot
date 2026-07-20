@@ -26,6 +26,7 @@ const processManager = require('../lib/processManager');
 const minecraftManager = require('../lib/minecraftManager');
 const { attachGameNotifier } = require('../lib/gameNotifier');
 const { setupTrackers } = require('../lib/trackerUpdater');
+const webClientServer = require('../lib/webClientServer');
 const { readLocationCounts } = require('../lib/locationCountReader');
 
 const DEFAULT_OPTIONS = {
@@ -659,9 +660,9 @@ async function startLobby(interaction, explicitLobbyId) {
     if (config.webClientPort) {
       pingRowButtons.push(
         new ButtonBuilder()
-          .setCustomId(`webclient_${game.id}`)
+          .setURL(webClientServer.buildLink(config, port))
           .setLabel('Open Web Client 🌐')
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(ButtonStyle.Link)
       );
     }
     const pingRow = new ActionRowBuilder().addComponents(pingRowButtons);

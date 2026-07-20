@@ -176,11 +176,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const { handleNotifToggle } = require('./slashCommandCategories/gameManager');
       return handleNotifToggle(interaction, gameId);
     }
-    if (action === 'webclient') {
-      const gameId = parseInt(args[0], 10);
-      const { handleWebClientLink } = require('./slashCommandCategories/gameManager');
-      return handleWebClientLink(interaction, gameId);
-    }
     if (action === 'trackerhide') {
       const gameId = parseInt(args[0], 10);
       const { handleTrackerHide } = require('./lib/trackerUpdater');

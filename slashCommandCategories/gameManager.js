@@ -19,6 +19,7 @@ const { isAdmin } = require('../lib/permissions');
 const { attachGameNotifier } = require('../lib/gameNotifier');
 const { setupTrackers } = require('../lib/trackerUpdater');
 const { readLocationCounts } = require('../lib/locationCountReader');
+const webClientServer = require('../lib/webClientServer');
 
 const STATUS_COLORS = {
   pending: 0xffa500,
@@ -135,9 +136,9 @@ async function doStartGame(interaction, gameId) {
     if (config.webClientPort) {
       pingRowButtons.push(
         new ButtonBuilder()
-          .setCustomId(`webclient_${gameId}`)
+          .setURL(webClientServer.buildLink(config, port))
           .setLabel('Open Web Client 🌐')
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(ButtonStyle.Link)
       );
     }
     const pingRow = new ActionRowBuilder().addComponents(pingRowButtons);
@@ -223,31 +224,6 @@ async function handleNotifToggle(interaction, gameId) {
   });
 }
 
-async function handleWebClientLink(interaction, gameId) {
-  const userId = interaction.user.id;
-  const game = await dbQueryOne('SELECT port, status, players FROM games WHERE id = ?', [gameId]);
-  if (!game) return interaction.reply({ content: 'Game not found.', ephemeral: true });
-  if (game.status !== 'running' || !config.webClientPort) {
-    return interaction.reply({ content: 'The web client is not available for this game right now.', ephemeral: true });
-  }
-
-  let players;
-  try { players = JSON.parse(game.players ?? '[]'); } catch { players = []; }
-  const me = players.find((p) => p.discordUserId === userId);
-
-  const webBase = `http://${config.serverHost}:${config.webClientPort}/`;
-  const params = new URLSearchParams({ url: `${config.serverHost}:${game.port}` });
-  if (me?.name) params.set('slot', me.name);
-  const link = `${webBase}#/?${params.toString()}`;
-
-  return interaction.reply({
-    content: me
-      ? `🌐 [Open Web Client](${link}) — prefilled as **${me.name}**.`
-      : `🌐 [Open Web Client](${webBase}) — you're not a listed player in this game, connect manually with server \`${config.serverHost}:${game.port}\`.`,
-    ephemeral: true,
-  });
-}
-
 async function handleFeedLevel(interaction, gameId) {
   const userId = interaction.user.id;
   const game = await dbQueryOne('SELECT players FROM games WHERE id = ?', [gameId]);
@@ -278,7 +254,6 @@ module.exports = {
   startGameHandler: doStartGame,
   handleNotifToggle,
   handleFeedLevel,
-  handleWebClientLink,
 
   commands: [
     {

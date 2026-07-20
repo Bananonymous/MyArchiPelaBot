@@ -15,6 +15,8 @@
 
   "_comment_webClientPort": "Port for the bundled Archipelago web client (topheranselmo's client). Set to 0/omit to disable.",
   "webClientPort": 8090,
+  "_comment_webClientPublicUrl": "Optional: public HTTPS URL if reverse-proxied (e.g. behind nginx). Falls back to http://serverHost:webClientPort/ if omitted.",
+  "webClientPublicUrl": "https://ap.your.domain/",
 
   "_comment_ssl": "Optional: enable WSS on AP server ports (required for browser clients on HTTPS pages)",
   "ssl": {
