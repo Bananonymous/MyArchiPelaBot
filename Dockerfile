@@ -43,6 +43,17 @@ RUN printf '#!/bin/sh\nexec /opt/venv/bin/python3 /opt/archipelago/Generate.py "
 RUN printf '#!/bin/sh\nexec /opt/venv/bin/python3 /opt/archipelago/MultiServer.py "$@"\n' \
       > /usr/local/bin/ArchipelagoServer && chmod +x /usr/local/bin/ArchipelagoServer
 
+# Build the Archipelago web client (static SPA — https://github.com/christopherwk210/tophers-archipelago-web-client).
+# Served at runtime by lib/webClientServer.js; only the built dist/ is kept in the final image.
+RUN git clone --depth 1 https://github.com/christopherwk210/tophers-archipelago-web-client.git /opt/webclient-src \
+    && cd /opt/webclient-src \
+    && npm install \
+    && npm run build \
+    && mkdir -p /opt/webclient \
+    && cp -r dist/. /opt/webclient/ \
+    && cd / \
+    && rm -rf /opt/webclient-src
+
 WORKDIR /app
 
 COPY package*.json ./

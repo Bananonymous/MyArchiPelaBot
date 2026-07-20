@@ -34,6 +34,7 @@ process.on('SIGTERM', () => {
 async function init() {
   await dbInit();
   await portManager.init();
+  require('./lib/webClientServer').start();
 }
 
 const client = new Client({
@@ -174,6 +175,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const gameId = parseInt(args[0], 10);
       const { handleNotifToggle } = require('./slashCommandCategories/gameManager');
       return handleNotifToggle(interaction, gameId);
+    }
+    if (action === 'webclient') {
+      const gameId = parseInt(args[0], 10);
+      const { handleWebClientLink } = require('./slashCommandCategories/gameManager');
+      return handleWebClientLink(interaction, gameId);
     }
     if (action === 'trackerhide') {
       const gameId = parseInt(args[0], 10);

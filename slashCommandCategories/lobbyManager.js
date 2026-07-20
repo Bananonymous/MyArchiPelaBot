@@ -649,12 +649,21 @@ async function startLobby(interaction, explicitLobbyId) {
           { label: 'Full feed', description: 'Post everything: items, joins, parts, chat, hints', value: 'full' },
         ])
     );
-    const pingRow = new ActionRowBuilder().addComponents(
+    const pingRowButtons = [
       new ButtonBuilder()
         .setCustomId(`notifping_${game.id}`)
         .setLabel('Enable Priority Pings 🔔')
-        .setStyle(ButtonStyle.Secondary)
-    );
+        .setStyle(ButtonStyle.Secondary),
+    ];
+    if (config.webClientPort) {
+      pingRowButtons.push(
+        new ButtonBuilder()
+          .setCustomId(`webclient_${game.id}`)
+          .setLabel('Open Web Client 🌐')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+    const pingRow = new ActionRowBuilder().addComponents(pingRowButtons);
     await channel.send({ embeds: [startEmbed], components: [controlsRow, pingRow] });
     attachGameNotifier(game.id, channel);
     setupTrackers(game.id, channel, playerData);

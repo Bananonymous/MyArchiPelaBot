@@ -51,6 +51,11 @@ The upstream bot only called the archipelago.gg API. This fork runs everything l
 ### Minecraft Dig integration
 `lib/minecraftManager.js` — detects Minecraft Dig players via `config.minecraftGameNames`, starts a Forge server from `config.minecraftServerPath` using `bash run.sh` (modern Forge uses `run.sh` not a direct JAR), kills the whole process group on stop (not just bash). Before starting, `scripts/apply_minecraft_patch.py` extracts the `.apmcdig` from the multiworld zip, writes `APData/` with the correct `.apmc` file and `archipelago.json` (with `server` field pre-filled), and syncs the mod jar from the installed apworld.
 
+### Web client
+`lib/webClientServer.js` — serves a prebuilt static copy of [tophers-archipelago-web-client](https://github.com/christopherwk210/tophers-archipelago-web-client) (a Vue SPA, hash-routed, no server-side logic needed) on `config.webClientPort`. The Dockerfile clones and builds it at image build time into `/opt/webclient`; only the built `dist/` ships in the final image. Started from `bot.js`'s `init()` alongside the Discord client — unrelated to and independent of it.
+
+Game-started embeds (`gameManager.js`, `lobbyManager.js`) get an "Open Web Client" button (`webclient_<gameId>`) when `config.webClientPort` is set. `gameManager.js`'s `handleWebClientLink` looks up the clicking user's AP slot name via `games.players[].discordUserId` and replies ephemerally with a link prefilled via the client's `?url=host:port&slot=name` query params (the client auto-connects on load with these).
+
 ### Python scripts
 All Python scripts in `scripts/` must inject a no-op `ModuleUpdate` into `sys.modules` before importing anything from `/opt/archipelago`, otherwise Archipelago's interactive version-check calls `input()` and crashes non-interactively.
 
@@ -66,7 +71,7 @@ sys.path.insert(0, "/opt/archipelago")
 SQLite via `sqlite3` npm package. Tables: `readySystems`, `readyChecks` (upstream), `games`, `lobbies`, `lobby_players`, `apworlds` (added). `dbQueryAll` returns `null` (not `[]`) when no rows match — all callers must guard for this.
 
 ### Config (`config.json`)
-See `config.json.example` for all fields. Key self-hosted additions: `serverHost`, `portRange`, `dataPath`, `maxConcurrentGames`, `adminRoles` (array of role IDs), `guildId` (enables instant guild-scoped command registration), `minecraftServerPath`, `minecraftJvmArgs`, `minecraftGameNames`.
+See `config.json.example` for all fields. Key self-hosted additions: `serverHost`, `portRange`, `dataPath`, `maxConcurrentGames`, `adminRoles` (array of role IDs), `guildId` (enables instant guild-scoped command registration), `minecraftServerPath`, `minecraftJvmArgs`, `minecraftGameNames`, `webClientPort` (0/omit disables the bundled web client).
 
 Admin check is in `lib/permissions.js`: Administrator permission OR a role in `config.adminRoles`.
 
