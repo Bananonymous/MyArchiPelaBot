@@ -56,32 +56,39 @@ client.tempData = {
   apInterfaces: new Map(),
 };
 
+// Empty handler dirs don't survive a git clone (git doesn't track empty dirs),
+// so create them on the fly instead of crashing on scandir ENOENT.
+function readdirSyncSafe(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  return fs.readdirSync(dir);
+}
+
 // Load message listener files
-fs.readdirSync('./messageListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
+readdirSyncSafe('./messageListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
   const listener = require(`./messageListeners/${listenerFile}`);
   client.messageListeners.push(listener);
 });
 
 // Load channelDeleted listeners
-fs.readdirSync('./channelDeletedListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
+readdirSyncSafe('./channelDeletedListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
   const listener = require(`./channelDeletedListeners/${listenerFile}`);
   client.channelDeletedListeners.push(listener);
 });
 
 // Load slash command category files
-fs.readdirSync('./slashCommandCategories').filter((file) => file.endsWith('.js')).forEach((categoryFile) => {
+readdirSyncSafe('./slashCommandCategories').filter((file) => file.endsWith('.js')).forEach((categoryFile) => {
   const slashCommandCategory = require(`./slashCommandCategories/${categoryFile}`);
   client.slashCommandCategories.push(slashCommandCategory);
 });
 
 // Load voice state listener files
-fs.readdirSync('./voiceStateListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
+readdirSyncSafe('./voiceStateListeners').filter((file) => file.endsWith('.js')).forEach((listenerFile) => {
   const listener = require(`./voiceStateListeners/${listenerFile}`);
   client.voiceStateListeners.push(listener);
 });
 
 // Load routines: game monitor runs every 60s; everything else runs hourly
-fs.readdirSync('./routines').filter((file) => file.endsWith('.js')).forEach((routineFile) => {
+readdirSyncSafe('./routines').filter((file) => file.endsWith('.js')).forEach((routineFile) => {
   const routine = require(`./routines/${routineFile}`);
   const intervalMs = routineFile === 'gameMonitor.js' ? 60_000 : 3_600_000;
   setInterval(() => {
