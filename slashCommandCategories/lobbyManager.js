@@ -40,6 +40,30 @@ function parseOptions(optionsStr) {
   try { return { ...DEFAULT_OPTIONS, ...JSON.parse(optionsStr ?? '{}') }; } catch { return { ...DEFAULT_OPTIONS }; }
 }
 
+// One small Link button per player, each pre-filled with that player's own slot name.
+// Link buttons are static (no interaction fires on click), so this is the only way to
+// get both "one click opens the browser" and "auto-fills the right player" at once —
+// a single shared button can't know who clicked it.
+function buildWebClientButtonRows(config, apPort, players) {
+  if (!config.webClientPort || !Array.isArray(players) || players.length === 0) return [];
+  // Message component limit: 5 rows total, 2 already used by controlsRow/pingRow.
+  const named = players.filter((p) => p.name).slice(0, 15);
+  const rows = [];
+  for (let i = 0; i < named.length; i += 5) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        named.slice(i, i + 5).map((p) =>
+          new ButtonBuilder()
+            .setURL(webClientServer.buildLink(config, apPort, p.name))
+            .setLabel(`🌐 ${p.name}`.slice(0, 80))
+            .setStyle(ButtonStyle.Link)
+        )
+      )
+    );
+  }
+  return rows;
+}
+
 const RELEASE_OPTIONS = [
   { label: 'Disabled',      description: '!release is never available',                         value: 'disabled' },
   { label: 'Manual always', description: 'Players can use !release at any time',                value: 'enabled' },
@@ -633,6 +657,10 @@ async function startLobby(interaction, explicitLobbyId) {
     if (mcStarted) fields.push({ name: 'Minecraft Server', value: `\`${config.serverHost}:${mcPort}\``, inline: false });
     else if (mcError) fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
 
+    if (config.webClientPort && playerData.some((p) => p.name)) {
+      fields.push({ name: 'Web Clients', value: playerData.filter((p) => p.name).map((p) => p.name).join(', ') });
+    }
+
     const startEmbed = new EmbedBuilder()
       .setTitle(`Game Started: ${lobby.name} (ID:${game.id})`)
       .setColor(0x00cc44)
@@ -651,22 +679,14 @@ async function startLobby(interaction, explicitLobbyId) {
           { label: 'Full feed', description: 'Post everything: items, joins, parts, chat, hints', value: 'full' },
         ])
     );
-    const pingRowButtons = [
+    const pingRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`notifping_${game.id}`)
         .setLabel('Enable Priority Pings 🔔')
-        .setStyle(ButtonStyle.Secondary),
-    ];
-    if (config.webClientPort) {
-      pingRowButtons.push(
-        new ButtonBuilder()
-          .setURL(webClientServer.buildLink(config, port))
-          .setLabel('Open Web Client 🌐')
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-    const pingRow = new ActionRowBuilder().addComponents(pingRowButtons);
-    await channel.send({ embeds: [startEmbed], components: [controlsRow, pingRow] });
+        .setStyle(ButtonStyle.Secondary)
+    );
+    const webClientRows = buildWebClientButtonRows(config, port, playerData);
+    await channel.send({ embeds: [startEmbed], components: [controlsRow, pingRow, ...webClientRows] });
     attachGameNotifier(game.id, channel);
     setupTrackers(game.id, channel, playerData);
 

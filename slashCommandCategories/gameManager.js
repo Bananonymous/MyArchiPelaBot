@@ -120,6 +120,10 @@ async function doStartGame(interaction, gameId) {
       fields.push({ name: 'Minecraft Server', value: `⚠️ Failed to start: ${mcError}`, inline: false });
     }
 
+    if (config.webClientPort && players.some((p) => p.name)) {
+      fields.push({ name: 'Web Clients', value: players.filter((p) => p.name).map((p) => p.name).join(', ') });
+    }
+
     const embed = new EmbedBuilder()
       .setTitle(`Game Started: ${game.gameName}`)
       .setColor(STATUS_COLORS.running)
@@ -127,22 +131,14 @@ async function doStartGame(interaction, gameId) {
       .setTimestamp();
 
     const controlsRow = buildGameControlsRow(gameId);
-    const pingRowButtons = [
+    const pingRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`notifping_${gameId}`)
         .setLabel('Enable Priority Pings 🔔')
-        .setStyle(ButtonStyle.Secondary),
-    ];
-    if (config.webClientPort) {
-      pingRowButtons.push(
-        new ButtonBuilder()
-          .setURL(webClientServer.buildLink(config, port))
-          .setLabel('Open Web Client 🌐')
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-    const pingRow = new ActionRowBuilder().addComponents(pingRowButtons);
-    await channel.send({ embeds: [embed], components: [controlsRow, pingRow] });
+        .setStyle(ButtonStyle.Secondary)
+    );
+    const webClientRows = buildWebClientButtonRows(config, port, players);
+    await channel.send({ embeds: [embed], components: [controlsRow, pingRow, ...webClientRows] });
     attachGameNotifier(gameId, channel);
     setupTrackers(gameId, channel, players);
 
@@ -176,6 +172,30 @@ async function doStartGame(interaction, gameId) {
   return interaction.followUp({
     content: `**${game.gameName}** is running!\nConnect at: \`${config.serverHost}:${port}\`${channelId ? ` — <#${channelId}>` : ''}`,
   });
+}
+
+// One small Link button per player, each pre-filled with that player's own slot name.
+// Link buttons are static (no interaction fires on click), so this is the only way to
+// get both "one click opens the browser" and "auto-fills the right player" at once —
+// a single shared button can't know who clicked it.
+function buildWebClientButtonRows(config, apPort, players) {
+  if (!config.webClientPort || !Array.isArray(players) || players.length === 0) return [];
+  // Message component limit: 5 rows total, 2 already used by controlsRow/pingRow.
+  const named = players.filter((p) => p.name).slice(0, 15);
+  const rows = [];
+  for (let i = 0; i < named.length; i += 5) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        named.slice(i, i + 5).map((p) =>
+          new ButtonBuilder()
+            .setURL(webClientServer.buildLink(config, apPort, p.name))
+            .setLabel(`🌐 ${p.name}`.slice(0, 80))
+            .setStyle(ButtonStyle.Link)
+        )
+      )
+    );
+  }
+  return rows;
 }
 
 function buildGameControlsRow(gameId) {
