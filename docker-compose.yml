@@ -4,6 +4,8 @@ services:
     # host networking exposes all game ports (38281-38380) without individual mappings
     network_mode: host
     restart: unless-stopped
+    cap_add:
+      - SYS_PTRACE  # lets py-spy/gdb attach to stuck ArchipelagoGenerate processes for debugging
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/data
